@@ -54,17 +54,29 @@ make build
 # or: go build -o xai-proxy ./cmd/xai-proxy
 ```
 
-### Docker (local always-on)
+### Container (local always-on, Apple Container on macOS)
+
+Dockerfile is OCI-compatible; no Compose required. On macOS prefer `container`:
 
 ```bash
-docker compose build
-docker compose run --rm xai-proxy login --no-browser   # open printed URL
-docker compose up -d
+container system start
+container builder start   # first time / if builder down
+
+container build -t xai-proxy:local -f Dockerfile \
+  --build-arg GO_VERSION=1.26.5 --build-arg VERSION=0.1.0 .
+
+mkdir -p "$HOME/.xai-proxy-container" && chmod 700 "$HOME/.xai-proxy-container"
+container run --rm -it --volume "$HOME/.xai-proxy-container:/data" \
+  --env XAI_PROXY_HOME=/data xai-proxy:local login --no-browser
+
+container run -d --name xai-proxy --publish 8645:8645 \
+  --volume "$HOME/.xai-proxy-container:/data" --env XAI_PROXY_HOME=/data \
+  xai-proxy:local
+
 curl -s http://127.0.0.1:8645/health
 ```
 
-Host port is published as **`127.0.0.1:8645` only**. Tokens live in volume
-`xai-proxy-data`. Full guide: [docs/DOCKER.md](docs/DOCKER.md).
+Full guide: [docs/DOCKER.md](docs/DOCKER.md).
 
 ## Usage
 
