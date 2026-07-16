@@ -15,7 +15,7 @@
 |------|------|
 | 绑定 **127.0.0.1**（默认） | 把端口暴露到公网 |
 | 每次 `/v1/*` 使用**本地 client API key** | 无 `Authorization` 调用 `/v1` |
-| 将 `tokens.json` **与** `client_key` 视为密钥 | 提交密钥、`.env` 或 volume 内容 |
+| 将 OAuth token **与** generate 得到的 client key 视为密钥 | 提交密钥、`.env` 或 volume 内容 |
 | 勿在共享主机上扩散 client key | 像密码一样外传密钥 |
 
 **`/v1/*` 强制本地客户端鉴权**：`Authorization: Bearer <client_key>`。  
@@ -52,19 +52,19 @@ make build
 ## 使用
 
 ```bash
+# 生成本地 client API key（完整 key 只在 stdout 打印一次——请立即保存；会覆盖旧 key）
+KEY=$(./xai-proxy generate)
+
 ./xai-proxy login
-./xai-proxy serve   # http://127.0.0.1:8645
+./xai-proxy serve   # http://127.0.0.1:7257
 ```
 
 | 客户端设置 | 值 |
 |------------|-----|
-| Base URL | `http://127.0.0.1:8645/v1` |
-| API Key | **本地 client key**（`xai-proxy key show`） |
+| Base URL | `http://127.0.0.1:7257/v1` |
+| API Key | **`xai-proxy generate` 得到的本地 key**（只展示一次） |
 
-```bash
-export XAI_PROXY_CLIENT_KEY="$(xai-proxy key show 2>/dev/null | head -1)"
-# 或: cat ~/.xai-proxy/client_key
-```
+**没有** `key show`。遗失 key 请再执行 `generate`（旧 key 立即失效）。
 
 ## 路径策略
 
@@ -95,35 +95,35 @@ Body 上限：**100 MiB**（媒体 / data-URI / STT 上传）。
 ### 示例
 
 ```bash
-KEY=$(xai-proxy key show 2>/dev/null | head -1)
+# KEY 来自: xai-proxy generate  （只展示一次）
 
 # 对话（xAI 原生；也可配合 OpenAI SDK）
-curl -s http://127.0.0.1:8645/v1/chat/completions \
+curl -s http://127.0.0.1:7257/v1/chat/completions \
   -H "Authorization: Bearer $KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"grok-4.5","messages":[{"role":"user","content":"hi"}]}'
 
 # 图片
-curl -s http://127.0.0.1:8645/v1/images/generations \
+curl -s http://127.0.0.1:7257/v1/images/generations \
   -H "Authorization: Bearer $KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"grok-imagine-image","prompt":"a red panda coding"}'
 
 # TTS（不是 /audio/speech）
-curl -s http://127.0.0.1:8645/v1/tts \
+curl -s http://127.0.0.1:7257/v1/tts \
   -H "Authorization: Bearer $KEY" \
   -H 'Content-Type: application/json' \
   -d '{"text":"Hello from Grok","voice_id":"Ara","language":"en"}' \
   -o speech.mp3
 
 # STT（不是 /audio/transcriptions）
-curl -s http://127.0.0.1:8645/v1/stt \
+curl -s http://127.0.0.1:7257/v1/stt \
   -H "Authorization: Bearer $KEY" \
   -F 'file=@./audio.wav' \
   -F 'language=en'
 
 # 视频提交
-curl -s http://127.0.0.1:8645/v1/videos/generations \
+curl -s http://127.0.0.1:7257/v1/videos/generations \
   -H "Authorization: Bearer $KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"grok-imagine-video","prompt":"waves on a beach"}'
@@ -134,10 +134,10 @@ curl -s http://127.0.0.1:8645/v1/videos/generations \
 | 路径 | 用途 |
 |------|------|
 | `~/.xai-proxy/tokens.json` | OAuth tokens（`0600`）— **密钥** |
-| `~/.xai-proxy/client_key` | 本地 client API key（`0600`）— **密钥** |
+| `~/.xai-proxy/client_key` | 仅保存 client key 的加盐 **SHA-256** 哈希（`0600`）；每次 `generate` 覆盖 |
 | `XAI_PROXY_HOME` | 覆盖配置目录 |
-| `XAI_PROXY_CLIENT_KEY` | 可选的 client key 环境变量覆盖 |
 
+明文 client key **仅**在 `generate` 时展示一次；磁盘为校验串（`v1$sha256$…`），无法还原明文。
 切勿提交 token、client key 或 volume 内容。
 
 ## 出站代理（HTTP / SOCKS）
@@ -167,7 +167,7 @@ export ALL_PROXY=socks5://127.0.0.1:1080
 ## 命令
 
 ```text
-xai-proxy start   # 需要时 login（--no-browser），再 serve
+xai-proxy generate   # 生成 client key（覆盖；只打印一次）
 xai-proxy login [--no-browser]
 xai-proxy serve
 xai-proxy status | logout | version

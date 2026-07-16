@@ -25,10 +25,10 @@ type Server struct {
 
 // Options for Serve.
 type Options struct {
-	Host         string
-	Port         int
-	Logger       *slog.Logger
-	ClientAPIKey string // local shared secret for /v1/*
+	Host              string
+	Port              int
+	Logger            *slog.Logger
+	ClientKeyVerifier string // salted hash from store; never the plaintext secret
 }
 
 // NewServer builds a proxy server. manager must be non-nil.
@@ -44,22 +44,22 @@ func NewServerWithUpstream(mgr *credential.Manager, upstream *http.Client, opt O
 		opt.Host = "127.0.0.1"
 	}
 	if opt.Port == 0 {
-		opt.Port = 8645
+		opt.Port = 7257
 	}
 	cfg := Config{
-		Manager:      mgr,
-		Logger:       opt.Logger,
-		Upstream:     upstream,
-		ClientAPIKey: strings.TrimSpace(opt.ClientAPIKey),
+		Manager:           mgr,
+		Logger:            opt.Logger,
+		Upstream:          upstream,
+		ClientKeyVerifier: strings.TrimSpace(opt.ClientKeyVerifier),
 	}
 	s := &Server{cfg: cfg, host: opt.Host, port: opt.Port}
 	mux := http.NewServeMux()
 	// Liveness / readiness: no client key (probes, container healthcheck).
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /ready", s.handleReady)
-	// All API traffic requires the local client API key.
-	mux.HandleFunc("/v1/", requireClientAuth(cfg.ClientAPIKey, s.cfg.HandleProxyWithRetry))
-	mux.HandleFunc("/v1", requireClientAuth(cfg.ClientAPIKey, func(w http.ResponseWriter, r *http.Request) {
+	// All API traffic requires the local client API key (verified via hash).
+	mux.HandleFunc("/v1/", requireClientAuth(cfg.ClientKeyVerifier, s.cfg.HandleProxyWithRetry))
+	mux.HandleFunc("/v1", requireClientAuth(cfg.ClientKeyVerifier, func(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotFound, "use /v1/<path> e.g. /v1/chat/completions", "path_not_allowed")
 	}))
 

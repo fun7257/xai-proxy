@@ -37,11 +37,8 @@ func Run(args []string) int {
 		return cmdLogin(args[1:], proxyURL)
 	case "serve":
 		return cmdServe(args[1:], proxyURL)
-	case "start":
-		// First-boot friendly: login if needed (default --no-browser), then serve.
-		return cmdStart(args[1:], proxyURL)
-	case "key":
-		return cmdKey(args[1:])
+	case "generate":
+		return cmdGenerate(args[1:])
 	case "status":
 		return cmdStatus(args[1:])
 	case "logout":
@@ -98,28 +95,28 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, `xai-proxy — local xAI OAuth proxy (chat + multimodal native /v1 paths)
 
 Usage:
-  xai-proxy [--proxy URL] start  [options]   # login if needed, then serve (container default)
+  xai-proxy generate                         # mint client API key (overwrites; shown once)
   xai-proxy [--proxy URL] login  [--no-browser] [--proxy URL]
-  xai-proxy [--proxy URL] serve  [--host ...] [--port ...] [--proxy URL] [--i-understand-no-client-auth]
-  xai-proxy key show | key regenerate
+  xai-proxy [--proxy URL] serve  [--host ...] [--port ...] [--proxy URL] [--i-understand-non-loopback-bind]
   xai-proxy status
   xai-proxy logout
   xai-proxy version
 
 Client auth (local API key, required on /v1/*):
-  Clients send:  Authorization: Bearer <client_key>
-  Key file:      $XAI_PROXY_HOME/client_key  (auto-created on start/serve)
-  Override:      env XAI_PROXY_CLIENT_KEY
+  1. Run:        xai-proxy generate   (prints key ONCE to stdout; save it)
+  2. Clients:    Authorization: Bearer <key>
+  On disk:       $XAI_PROXY_HOME/client_key  stores salted SHA-256 only (not the secret)
+  Each generate overwrites the previous verifier; plaintext is never re-shown
   /health and /ready stay open for probes
 
-start options (same as serve, plus login):
-  --no-browser                 print device URL only (default: true for start)
-  --browser                    allow opening a local browser during login
-  --host / --port / --proxy / --i-understand-no-client-auth
+serve options:
+  --host / --port / --proxy
+  --i-understand-non-loopback-bind   required when --host is not loopback (client key still required)
 
-First run: start prints an accounts.x.ai URL; after you approve in a browser,
-tokens are saved and the API proxy starts automatically. Client API key is
-printed once when created.
+login options:
+  --no-browser                 print device URL only (do not open a browser)
+
+First run: generate → login → serve.
 
 Outbound proxy (OAuth + API egress):
   --proxy URL     http(s)://host:port | socks5://host:port | socks5h://host:port
@@ -155,7 +152,7 @@ func cmdLogin(args []string, globalProxy string) int {
 	if code := doLogin(!*noBrowser); code != 0 {
 		return code
 	}
-	fmt.Fprintln(os.Stderr, "  Next:   xai-proxy serve   (or xai-proxy start)")
+	fmt.Fprintln(os.Stderr, "  Next:   xai-proxy serve")
 	return 0
 }
 
@@ -190,9 +187,9 @@ func doLogin(openBrowser bool) int {
 func cmdServe(args []string, globalProxy string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	host := fs.String("host", "127.0.0.1", "listen host")
-	port := fs.Int("port", 8645, "listen port")
+	port := fs.Int("port", 7257, "listen port")
 	proxyFlag := fs.String("proxy", "", "outbound HTTP or SOCKS5 proxy URL")
-	allowRemote := fs.Bool("i-understand-no-client-auth", false, "required if host is not loopback")
+	allowRemote := fs.Bool("i-understand-non-loopback-bind", false, "required if host is not loopback; does not disable client API key auth")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -205,62 +202,17 @@ func cmdServe(args []string, globalProxy string) int {
 
 	mgr := credential.NewManager(nil)
 	if !mgr.IsAuthenticated() {
-		fmt.Fprintln(os.Stderr, "Not logged in. Run `xai-proxy start` (login+serve) or `xai-proxy login` first.")
+		fmt.Fprintln(os.Stderr, "Not logged in. Run `xai-proxy login` first.")
 		return 2
 	}
-	return runServe(*host, *port, *allowRemote, explicit)
-}
-
-// cmdStart: if no usable tokens, device-login (default --no-browser), then serve.
-func cmdStart(args []string, globalProxy string) int {
-	fs := flag.NewFlagSet("start", flag.ContinueOnError)
-	// Container-friendly defaults
-	host := fs.String("host", "127.0.0.1", "listen host")
-	port := fs.Int("port", 8645, "listen port")
-	proxyFlag := fs.String("proxy", "", "outbound HTTP or SOCKS5 proxy URL")
-	allowRemote := fs.Bool("i-understand-no-client-auth", false, "required if host is not loopback")
-	// Default no-browser for start (print URL; user authorizes on another device/browser).
-	noBrowser := fs.Bool("no-browser", true, "print device URL only (default true for start)")
-	useBrowser := fs.Bool("browser", false, "open a local browser during login (overrides --no-browser)")
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-
-	explicit := mergeProxy(*proxyFlag, globalProxy)
-	if err := applyProxy(explicit); err != nil {
-		fmt.Fprintf(os.Stderr, "proxy: %v\n", err)
-		return 2
-	}
-	fmt.Fprintf(os.Stderr, "Outbound: %s\n", outbound.Describe(explicit))
-
-	mgr := credential.NewManager(nil)
-	if !mgr.IsAuthenticated() {
-		fmt.Fprintln(os.Stderr, "No credentials found — starting device login…")
-		fmt.Fprintln(os.Stderr, "Open the URL below in a browser, approve access, then this process will serve automatically.")
-		fmt.Fprintln(os.Stderr)
-		openBrowser := *useBrowser // default false; --browser opens local browser
-		if *noBrowser && !*useBrowser {
-			openBrowser = false
-		}
-		_ = noBrowser // default true; only --browser flips openBrowser on
-		if code := doLogin(openBrowser); code != 0 {
-			return code
-		}
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "Starting API proxy…")
-	} else {
-		fmt.Fprintln(os.Stderr, "Credentials present — starting API proxy…")
-	}
-
 	return runServe(*host, *port, *allowRemote, explicit)
 }
 
 func runServe(host string, port int, allowRemote bool, explicitProxy string) int {
 	if !proxy.IsLoopback(host) && !allowRemote {
 		fmt.Fprintf(os.Stderr,
-			"refusing to bind non-loopback address %q without --i-understand-no-client-auth\n"+
-				"(this proxy has no client authentication; anyone who can connect spends your SuperGrok quota)\n",
+			"refusing to bind non-loopback address %q without --i-understand-non-loopback-bind\n"+
+				"(/v1/* still requires the local client key; anyone with the key and network access can use your quota)\n",
 			host)
 		return 2
 	}
@@ -287,33 +239,35 @@ func runServe(host string, port int, allowRemote bool, explicitProxy string) int
 		return 2
 	}
 
-	clientKey, created, err := store.LoadOrCreateClientKey()
+	verifier, err := store.LoadClientKeyVerifier()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "client API key: %v\n", err)
 		return 1
 	}
-	if created {
-		fmt.Fprintln(os.Stderr, "Generated new local client API key (save this for your apps):")
-		fmt.Fprintf(os.Stderr, "  %s\n", clientKey)
-		fmt.Fprintf(os.Stderr, "  file: %s\n", store.FormatClientKeyPath())
-		fmt.Fprintln(os.Stderr)
+	if verifier == "" {
+		fmt.Fprintf(os.Stderr,
+			"no client API key configured\n"+
+				"  run:  xai-proxy generate\n"+
+				"  (plaintext key is printed once; disk stores a hash only)\n"+
+				"  file: %s\n", store.FormatClientKeyPath())
+		return 2
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	srv := proxy.NewServerWithUpstream(mgr, upClient, proxy.Options{
-		Host: host, Port: port, Logger: logger, ClientAPIKey: clientKey,
+		Host: host, Port: port, Logger: logger, ClientKeyVerifier: verifier,
 	})
 
 	fmt.Fprintf(os.Stderr, "Starting xai-proxy\n")
 	fmt.Fprintf(os.Stderr, "  Listening on:  http://%s/v1\n", srv.Addr())
 	fmt.Fprintf(os.Stderr, "  Forwarding to: https://api.x.ai/v1 (chat + images + tts + stt + videos)\n")
 	fmt.Fprintf(os.Stderr, "  Outbound:     %s\n", outbound.Describe(explicitProxy))
-	fmt.Fprintf(os.Stderr, "  Client auth:   required on /v1/* (Bearer local key)\n")
-	fmt.Fprintf(os.Stderr, "  Body limit:    %d bytes\n\n", proxy.MaxBodyBytes)
+	fmt.Fprintf(os.Stderr, "  Client auth:  required on /v1/* (Bearer local key)\n")
+	fmt.Fprintf(os.Stderr, "  Key hash:     %s\n", store.FormatClientKeyPath())
+	fmt.Fprintf(os.Stderr, "  Body limit:   %d bytes\n\n", proxy.MaxBodyBytes)
 	fmt.Fprintf(os.Stderr, "Client config:\n")
 	fmt.Fprintf(os.Stderr, "  Base URL:  http://%s/v1\n", srv.Addr())
-	fmt.Fprintf(os.Stderr, "  API Key:   %s\n", clientKey)
-	fmt.Fprintf(os.Stderr, "  (also:    xai-proxy key show)\n")
+	fmt.Fprintf(os.Stderr, "  API Key:   (from xai-proxy generate — not stored or shown again)\n")
 	fmt.Fprintf(os.Stderr, "  Paths:     all xAI-native; chat also OpenAI full-compat\n")
 	fmt.Fprintf(os.Stderr, "  Chat:      /v1/chat/completions model=grok-4.5\n")
 	fmt.Fprintf(os.Stderr, "  Media:     /v1/images/* /v1/tts /v1/stt /v1/videos/...\n")
@@ -347,11 +301,29 @@ func runServe(host string, port int, allowRemote bool, explicitProxy string) int
 func cmdStatus(args []string) int {
 	_ = args
 	mgr := credential.NewManager(nil)
-	st := mgr.Status()
+	oauth := mgr.Status()
+	ckOK := store.ClientKeyConfigured()
+	out := struct {
+		State     string `json:"state"`
+		UpdatedAt string `json:"updated_at,omitempty"`
+		Message   string `json:"message,omitempty"`
+		BaseURL   string `json:"base_url,omitempty"`
+		// Local client API key: configured or not (no path/secret).
+		ClientKey string `json:"client_key"` // "configured" | "not_configured"
+	}{
+		State:     oauth.State,
+		UpdatedAt: oauth.UpdatedAt,
+		Message:   oauth.Message,
+		BaseURL:   oauth.BaseURL,
+		ClientKey: "not_configured",
+	}
+	if ckOK {
+		out.ClientKey = "configured"
+	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(st)
-	if st.State != store.StatusReady {
+	_ = enc.Encode(out)
+	if oauth.State != store.StatusReady || !ckOK {
 		return 1
 	}
 	return 0
@@ -367,40 +339,20 @@ func cmdLogout(args []string) int {
 	return 0
 }
 
-func cmdKey(args []string) int {
-	sub := "show"
-	if len(args) > 0 {
-		sub = args[0]
+// cmdGenerate mints a new client API key, overwrites the previous one, and
+// prints the secret once on stdout. There is no "show" command.
+func cmdGenerate(args []string) int {
+	_ = args
+	k, err := store.GenerateAndSaveClientKey()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "generate: %v\n", err)
+		return 1
 	}
-	switch sub {
-	case "show", "":
-		k, created, err := store.LoadOrCreateClientKey()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "key: %v\n", err)
-			return 1
-		}
-		if created {
-			fmt.Fprintln(os.Stderr, "Created new client API key:")
-		}
-		fmt.Println(k)
-		fmt.Fprintf(os.Stderr, "file: %s\n", store.FormatClientKeyPath())
-		return 0
-	case "regenerate", "reset":
-		k, err := store.GenerateClientKey()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "key: %v\n", err)
-			return 1
-		}
-		if err := store.SaveClientKey(k); err != nil {
-			fmt.Fprintf(os.Stderr, "key: %v\n", err)
-			return 1
-		}
-		fmt.Fprintln(os.Stderr, "Regenerated client API key (update your clients):")
-		fmt.Println(k)
-		fmt.Fprintf(os.Stderr, "file: %s\n", store.FormatClientKeyPath())
-		return 0
-	default:
-		fmt.Fprintf(os.Stderr, "usage: xai-proxy key show | key regenerate\n")
-		return 2
-	}
+	fmt.Fprintln(os.Stderr, "New client API key (shown once — save it now; update your clients):")
+	fmt.Fprintln(os.Stderr, "  Disk stores a salted SHA-256 hash only (not this secret).")
+	fmt.Fprintln(os.Stderr, "  Each generate overwrites the previous verifier.")
+	fmt.Fprintf(os.Stderr, "  file: %s\n", store.FormatClientKeyPath())
+	fmt.Fprintln(os.Stderr)
+	fmt.Println(k)
+	return 0
 }

@@ -19,9 +19,9 @@ import (
 // Config for the reverse proxy.
 type Config struct {
 	Manager *credential.Manager
-	// ClientAPIKey is the local shared secret clients must present on /v1/*.
+	// ClientKeyVerifier is the salted hash line from store (never plaintext).
 	// Required for production serve; empty rejects all /v1 requests.
-	ClientAPIKey string
+	ClientKeyVerifier string
 	// AllowedPaths, if non-nil, overrides PathAllowed with an exact map (tests only).
 	AllowedPaths map[string]struct{}
 	// MaxBodyBytes overrides MaxBodyBytes default when > 0.

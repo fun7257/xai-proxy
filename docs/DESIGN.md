@@ -14,12 +14,13 @@ Chinese: [DESIGN_zh.md](DESIGN_zh.md).
 
 | Layer | Credential | Direction | Storage |
 |-------|------------|-----------|---------|
-| Local client | `client_key` (`sk-xai-…`) | client → proxy | `~/.xai-proxy/client_key` or `XAI_PROXY_CLIENT_KEY` |
+| Local client | `sk-xai-…` (plaintext only at generate) | client → proxy | Disk: salted SHA-256 in `client_key` (latest only) |
 | Upstream OAuth | access / refresh | proxy → xAI | `~/.xai-proxy/tokens.json` |
 
-- `/v1/*`: validate client key → strip client auth headers → attach OAuth Bearer and forward
+- `/v1/*`: hash presented key → constant-time compare to stored verifier → strip client auth headers → attach OAuth Bearer
 - `/health`, `/ready`: open (probes)
-- CLI: `xai-proxy key show` / `key regenerate`
+- CLI: `xai-proxy generate` (overwrites previous verifier; plaintext printed **once** on stdout; never re-stored as plaintext)
+- Verifier format: `v1$sha256$<salt_hex>$<hash_hex>` (stdlib `crypto/sha256`)
 
 ## Layers
 
@@ -28,7 +29,7 @@ Chinese: [DESIGN_zh.md](DESIGN_zh.md).
 3. **Credential manager** (`internal/credential`) — `GetBearer` / `ForceRefresh` / `Status`  
 4. **Proxy** (`internal/proxy`) — `net/http` pass-through + path allowlist + client auth  
 5. **Outbound** (`internal/outbound`) — HTTP/SOCKS egress proxy policy  
-6. **CLI** (`internal/cli`) — `start` / `login` / `serve` / `key` / …
+6. **CLI** (`internal/cli`) — `generate` / `login` / `serve` / `status` / …
 
 ## Path policy
 
@@ -83,10 +84,9 @@ Refresh: single-use, atomic write-back; **403** = tier/entitlement denial; termi
 ## CLI
 
 ```text
-xai-proxy [--proxy URL] start   [options]   # login if no tokens, then serve
+xai-proxy generate                          # mint client key (overwrite; show once)
 xai-proxy [--proxy URL] login   [--no-browser] [--proxy URL]
 xai-proxy [--proxy URL] serve   [--host ...] [--port ...] [--proxy URL]
-xai-proxy key show | key regenerate
 xai-proxy status | logout | version
 ```
 
@@ -105,15 +105,14 @@ Implementation: `internal/outbound`.
 | Path / variable | Purpose |
 |-----------------|---------|
 | `~/.xai-proxy/tokens.json` | OAuth tokens (`0600`) |
-| `~/.xai-proxy/client_key` | Local client API key (`0600`) |
+| `~/.xai-proxy/client_key` | Salted SHA-256 verifier only (`0600`); each `generate` overwrites |
 | `XAI_PROXY_HOME` | Override config directory |
-| `XAI_PROXY_CLIENT_KEY` | Optional client key override |
 
 ## Stack
 
 - Go **1.26.5**
 - HTTP: **`net/http` only** (no third-party routers)
-- Default zero third-party deps; outbound SOCKS: `golang.org/x/net`
+- Default zero third-party; outbound SOCKS: `golang.org/x/net`
 
 ## Explicitly out of scope (product)
 

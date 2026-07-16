@@ -8,20 +8,21 @@ import (
 )
 
 // requireClientAuth wraps a handler and rejects requests without a valid local API key.
+// verifier is the on-disk salted hash line (never the plaintext secret).
 // /health and /ready should NOT use this wrapper (liveness probes).
-func requireClientAuth(expectedKey string, next http.HandlerFunc) http.HandlerFunc {
+func requireClientAuth(verifier string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		expectedKey = strings.TrimSpace(expectedKey)
-		if expectedKey == "" {
+		verifier = strings.TrimSpace(verifier)
+		if verifier == "" {
 			writeJSONError(w, http.StatusInternalServerError,
 				"server misconfigured: client API key not set",
 				"client_auth_misconfigured")
 			return
 		}
 		presented := store.ExtractClientKeyFromRequest(r)
-		if !store.EqualClientKey(expectedKey, presented) {
+		if !store.VerifyClientKey(verifier, presented) {
 			writeJSONError(w, http.StatusUnauthorized,
-				"missing or invalid client API key; use Authorization: Bearer <key> (see xai-proxy key show)",
+				"missing or invalid client API key; use Authorization: Bearer <key> from xai-proxy generate",
 				"client_unauthorized")
 			return
 		}

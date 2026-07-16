@@ -2,56 +2,131 @@ package store
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestGenerateAndEqualClientKey(t *testing.T) {
+func TestGenerateAndVerifyClientKey(t *testing.T) {
 	k1, err := GenerateClientKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(k1) < 20 {
-		t.Fatalf("short key %q", k1)
+	if len(k1) < 20 || !strings.HasPrefix(k1, clientKeyPrefix) {
+		t.Fatalf("bad key %q", k1)
 	}
-	if !strings.HasPrefix(k1, clientKeyPrefix) {
-		t.Fatalf("prefix %q", k1)
+	v, err := FormatClientKeyVerifier(k1)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !EqualClientKey(k1, k1) {
-		t.Fatal("self equal")
+	if strings.Contains(v, k1) {
+		t.Fatal("verifier must not embed plaintext key")
 	}
-	if equalClientKey(k1, k1+"x") {
-		t.Fatal("should not equal")
+	if !strings.HasPrefix(v, "v1$sha256$") {
+		t.Fatalf("unexpected format %q", v)
 	}
-	if equalClientKey("", "x") {
-		t.Fatal("empty expected")
+	if !VerifyClientKey(v, k1) {
+		t.Fatal("self verify")
 	}
-}
-
-func equalClientKey(a, b string) bool { return EqualClientKey(a, b) }
-
-func TestLoadOrCreateClientKey(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XAI_PROXY_HOME", dir)
-	t.Setenv("XAI_PROXY_CLIENT_KEY", "")
-
-	k1, created, err := LoadOrCreateClientKey()
-	if err != nil || !created || k1 == "" {
-		t.Fatalf("k1=%q created=%v err=%v", k1, created, err)
+	if VerifyClientKey(v, k1+"x") {
+		t.Fatal("wrong key must fail")
 	}
-	k2, created2, err := LoadOrCreateClientKey()
-	if err != nil || created2 || k2 != k1 {
-		t.Fatalf("k2=%q created=%v err=%v", k2, created2, err)
+	if VerifyClientKey(v, "") {
+		t.Fatal("empty presented")
+	}
+	if VerifyClientKey("", k1) {
+		t.Fatal("empty verifier")
 	}
 }
 
-func TestLoadOrCreate_EnvOverride(t *testing.T) {
+func TestGenerateAndSaveStoresHashOnly(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XAI_PROXY_HOME", dir)
-	t.Setenv("XAI_PROXY_CLIENT_KEY", "sk-xai-from-env-test-key-0001")
-	k, created, err := LoadOrCreateClientKey()
-	if err != nil || created || k != "sk-xai-from-env-test-key-0001" {
-		t.Fatalf("k=%q created=%v err=%v", k, created, err)
+
+	k1, err := GenerateAndSaveClientKey()
+	if err != nil || k1 == "" {
+		t.Fatalf("first: k=%q err=%v", k1, err)
+	}
+	path := filepath.Join(dir, clientKeyFileName)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := strings.TrimSpace(string(raw))
+	if strings.Contains(line, k1) {
+		t.Fatalf("disk must not contain plaintext: %q", line)
+	}
+	if !strings.HasPrefix(line, "v1$sha256$") {
+		t.Fatalf("unexpected format %q", line)
+	}
+	v, err := LoadClientKeyVerifier()
+	if err != nil || v != line {
+		t.Fatalf("load: %q err=%v", v, err)
+	}
+	if !VerifyClientKey(v, k1) {
+		t.Fatal("verify k1")
+	}
+
+	k2, err := GenerateAndSaveClientKey()
+	if err != nil || k2 == "" || k2 == k1 {
+		t.Fatalf("second: k=%q err=%v", k2, err)
+	}
+	v2, err := LoadClientKeyVerifier()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if VerifyClientKey(v2, k1) {
+		t.Fatal("old key must fail after overwrite")
+	}
+	if !VerifyClientKey(v2, k2) {
+		t.Fatal("new key must verify")
+	}
+}
+
+func TestLoadClientKeyVerifierMissing(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XAI_PROXY_HOME", dir)
+
+	v, err := LoadClientKeyVerifier()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != "" {
+		t.Fatalf("want empty, got %q", v)
+	}
+}
+
+func TestClientKeyConfigured(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XAI_PROXY_HOME", dir)
+
+	if ClientKeyConfigured() {
+		t.Fatal("expected not configured")
+	}
+	if _, err := GenerateAndSaveClientKey(); err != nil {
+		t.Fatal(err)
+	}
+	if !ClientKeyConfigured() {
+		t.Fatal("expected configured")
+	}
+}
+
+func TestLoadClientKeyVerifierRejectsLegacy(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XAI_PROXY_HOME", dir)
+	path := filepath.Join(dir, clientKeyFileName)
+
+	for _, legacy := range []string{
+		"sk-xai-deadbeef\n",
+		"v2$argon2id$m=65536,t=3,p=1$aa$bb\n",
+	} {
+		if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadClientKeyVerifier(); err == nil {
+			t.Fatalf("expected error for legacy %q", strings.TrimSpace(legacy))
+		}
 	}
 }
 

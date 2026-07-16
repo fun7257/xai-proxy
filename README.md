@@ -18,7 +18,7 @@ The proxy attaches your OAuth bearer and **pass-through** forwards to
 |----|--------|
 | Bind **127.0.0.1** (default) | Expose the port to the public internet |
 | Use the **local client API key** on every `/v1/*` call | Call `/v1` without `Authorization` |
-| Treat `tokens.json` **and** `client_key` as secrets | Commit keys, `.env`, or volume dumps |
+| Treat OAuth tokens **and** the generated client key as secrets | Commit keys, `.env`, or volume dumps |
 | Keep client key off shared hosts | Share the key like a password |
 
 **Local client auth is required** on `/v1/*`: `Authorization: Bearer <client_key>`.  
@@ -56,19 +56,19 @@ make build
 ## Usage
 
 ```bash
+# Mint a local client API key (printed ONCE to stdout — save it; overwrites previous)
+KEY=$(./xai-proxy generate)
+
 ./xai-proxy login
-./xai-proxy serve   # http://127.0.0.1:8645
+./xai-proxy serve   # http://127.0.0.1:7257
 ```
 
 | Client setting | Value |
 |----------------|--------|
-| Base URL | `http://127.0.0.1:8645/v1` |
-| API Key | **local client key** (`xai-proxy key show`) |
+| Base URL | `http://127.0.0.1:7257/v1` |
+| API Key | **local client key** from `xai-proxy generate` (shown once) |
 
-```bash
-export XAI_PROXY_CLIENT_KEY="$(xai-proxy key show 2>/dev/null | head -1)"
-# or: cat ~/.xai-proxy/client_key
-```
+There is **no** `key show`. If you lose the key, run `generate` again (old key stops working).
 
 ## Path policy
 
@@ -101,35 +101,35 @@ Body size limit: **100 MiB** (media / data-URI / STT upload).
 ### Examples
 
 ```bash
-KEY=$(xai-proxy key show 2>/dev/null | head -1)
+# KEY from: xai-proxy generate  (shown once)
 
 # Chat (xAI native; also works with OpenAI SDK)
-curl -s http://127.0.0.1:8645/v1/chat/completions \
+curl -s http://127.0.0.1:7257/v1/chat/completions \
   -H "Authorization: Bearer $KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"grok-4.5","messages":[{"role":"user","content":"hi"}]}'
 
 # Image
-curl -s http://127.0.0.1:8645/v1/images/generations \
+curl -s http://127.0.0.1:7257/v1/images/generations \
   -H "Authorization: Bearer $KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"grok-imagine-image","prompt":"a red panda coding"}'
 
 # TTS (not /audio/speech)
-curl -s http://127.0.0.1:8645/v1/tts \
+curl -s http://127.0.0.1:7257/v1/tts \
   -H "Authorization: Bearer $KEY" \
   -H 'Content-Type: application/json' \
   -d '{"text":"Hello from Grok","voice_id":"Ara","language":"en"}' \
   -o speech.mp3
 
 # STT (not /audio/transcriptions)
-curl -s http://127.0.0.1:8645/v1/stt \
+curl -s http://127.0.0.1:7257/v1/stt \
   -H "Authorization: Bearer $KEY" \
   -F 'file=@./audio.wav' \
   -F 'language=en'
 
 # Video submit
-curl -s http://127.0.0.1:8645/v1/videos/generations \
+curl -s http://127.0.0.1:7257/v1/videos/generations \
   -H "Authorization: Bearer $KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"grok-imagine-video","prompt":"waves on a beach"}'
@@ -140,10 +140,11 @@ curl -s http://127.0.0.1:8645/v1/videos/generations \
 | Path | Purpose |
 |------|---------|
 | `~/.xai-proxy/tokens.json` | OAuth tokens (`0600`) — **secret** |
-| `~/.xai-proxy/client_key` | Local client API key (`0600`) — **secret** |
+| `~/.xai-proxy/client_key` | Salted **SHA-256** hash of the client key only (`0600`); each `generate` overwrites |
 | `XAI_PROXY_HOME` | Override config directory |
-| `XAI_PROXY_CLIENT_KEY` | Optional env override for client key |
 
+The plaintext client key is shown **only** by `generate`. The on-disk file is a
+verifier (`v1$sha256$…`) and cannot recover the secret.
 Never commit tokens, client keys, or volume contents.
 
 ## Outbound proxy (HTTP / SOCKS)
@@ -174,7 +175,7 @@ export ALL_PROXY=socks5://127.0.0.1:1080
 ## Commands
 
 ```text
-xai-proxy start   # login if needed (--no-browser), then serve
+xai-proxy generate   # mint client key (overwrite; print once)
 xai-proxy login [--no-browser]
 xai-proxy serve
 xai-proxy status | logout | version

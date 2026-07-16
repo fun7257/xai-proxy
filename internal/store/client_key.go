@@ -2,6 +2,7 @@ package store
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
@@ -13,12 +14,17 @@ import (
 )
 
 const (
-	clientKeyFileName = "client_key"
-	clientKeyPrefix   = "sk-xai-"
-	clientKeyBytes    = 32 // 256-bit
+	clientKeyFileName  = "client_key"
+	clientKeyPrefix    = "sk-xai-"
+	clientKeyBytes     = 32 // 256-bit secret
+	clientKeySaltBytes = 16
+	// On-disk verifier: v1$sha256$<salt_hex>$<sha256(salt||key)_hex>
+	// Never stores the plaintext API key. Suitable for high-entropy random keys.
+	clientKeyVerifierVersion = "v1"
+	clientKeyHashAlg         = "sha256"
 )
 
-// ClientKeyPath returns the path to the local client API key file.
+// ClientKeyPath returns the path to the client key *verifier* file (hash only).
 func ClientKeyPath() (string, error) {
 	dir, err := HomeDir()
 	if err != nil {
@@ -36,8 +42,61 @@ func GenerateClientKey() (string, error) {
 	return clientKeyPrefix + hex.EncodeToString(b), nil
 }
 
-// LoadClientKey reads the client key file. Returns "" if missing.
-func LoadClientKey() (string, error) {
+// hashClientKey returns SHA-256(salt || key). Irreversible for high-entropy keys.
+func hashClientKey(salt []byte, key string) []byte {
+	h := sha256.New()
+	_, _ = h.Write(salt)
+	_, _ = h.Write([]byte(key))
+	return h.Sum(nil)
+}
+
+// FormatClientKeyVerifier builds the on-disk verifier line for key (with random salt).
+func FormatClientKeyVerifier(key string) (string, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", errors.New("empty client key")
+	}
+	salt := make([]byte, clientKeySaltBytes)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+	sum := hashClientKey(salt, key)
+	return fmt.Sprintf("%s$%s$%s$%s",
+		clientKeyVerifierVersion,
+		clientKeyHashAlg,
+		hex.EncodeToString(salt),
+		hex.EncodeToString(sum),
+	), nil
+}
+
+// parseClientKeyVerifier parses v1$sha256$salt$hash.
+// Rejects plaintext and other formats (re-run generate).
+func parseClientKeyVerifier(line string) (salt, wantHash []byte, err error) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return nil, nil, errors.New("empty verifier")
+	}
+	parts := strings.Split(line, "$")
+	if len(parts) != 4 {
+		return nil, nil, errors.New("invalid client key verifier format (run xai-proxy generate)")
+	}
+	if parts[0] != clientKeyVerifierVersion || parts[1] != clientKeyHashAlg {
+		return nil, nil, fmt.Errorf("unsupported client key verifier %s$%s (run xai-proxy generate)", parts[0], parts[1])
+	}
+	salt, err = hex.DecodeString(parts[2])
+	if err != nil || len(salt) == 0 {
+		return nil, nil, errors.New("invalid client key verifier salt")
+	}
+	wantHash, err = hex.DecodeString(parts[3])
+	if err != nil || len(wantHash) != sha256.Size {
+		return nil, nil, errors.New("invalid client key verifier hash")
+	}
+	return salt, wantHash, nil
+}
+
+// LoadClientKeyVerifier reads the on-disk hash verifier. Returns "" if missing.
+// Does not return the plaintext secret (it is never stored).
+func LoadClientKeyVerifier() (string, error) {
 	path, err := ClientKeyPath()
 	if err != nil {
 		return "", err
@@ -49,14 +108,21 @@ func LoadClientKey() (string, error) {
 		}
 		return "", err
 	}
-	return strings.TrimSpace(string(data)), nil
+	line := strings.TrimSpace(string(data))
+	if line == "" {
+		return "", nil
+	}
+	if _, _, err := parseClientKeyVerifier(line); err != nil {
+		return "", fmt.Errorf("%s: %w", path, err)
+	}
+	return line, nil
 }
 
-// SaveClientKey writes the client key with mode 0600 (atomic).
-func SaveClientKey(key string) error {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return errors.New("empty client key")
+// SaveClientKeyVerifier writes the verifier line with mode 0600 (atomic overwrite).
+func SaveClientKeyVerifier(verifier string) error {
+	verifier = strings.TrimSpace(verifier)
+	if _, _, err := parseClientKeyVerifier(verifier); err != nil {
+		return err
 	}
 	if _, err := EnsureHome(); err != nil {
 		return err
@@ -73,7 +139,7 @@ func SaveClientKey(key string) error {
 	tmpName := tmp.Name()
 	defer func() { _ = os.Remove(tmpName) }()
 
-	if _, err := tmp.WriteString(key + "\n"); err != nil {
+	if _, err := tmp.WriteString(verifier + "\n"); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -90,47 +156,39 @@ func SaveClientKey(key string) error {
 	return os.Rename(tmpName, path)
 }
 
-// LoadOrCreateClientKey returns the existing key or generates and saves a new one.
-// created is true when a new key was written.
-func LoadOrCreateClientKey() (key string, created bool, err error) {
-	// Explicit env override never written to disk (operator injects secret).
-	if env := strings.TrimSpace(os.Getenv("XAI_PROXY_CLIENT_KEY")); env != "" {
-		return env, false, nil
-	}
-	key, err = LoadClientKey()
+// GenerateAndSaveClientKey mints a new key, stores only a salted SHA-256 hash on disk,
+// and returns the plaintext once. Each call overwrites the previous verifier.
+func GenerateAndSaveClientKey() (plaintext string, err error) {
+	key, err := GenerateClientKey()
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
-	if key != "" {
-		return key, false, nil
-	}
-	key, err = GenerateClientKey()
+	verifier, err := FormatClientKeyVerifier(key)
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
-	if err := SaveClientKey(key); err != nil {
-		return "", false, err
+	if err := SaveClientKeyVerifier(verifier); err != nil {
+		return "", err
 	}
-	return key, true, nil
+	return key, nil
 }
 
-// EqualClientKey compares presented vs expected in constant time.
-// Empty expected means no valid key configured.
-func EqualClientKey(expected, presented string) bool {
-	expected = strings.TrimSpace(expected)
+// VerifyClientKey checks presented plaintext against a stored verifier line.
+// Uses constant-time compare on the hash digests.
+func VerifyClientKey(verifier, presented string) bool {
+	salt, want, err := parseClientKeyVerifier(verifier)
+	if err != nil {
+		return false
+	}
 	presented = strings.TrimSpace(presented)
-	if expected == "" || presented == "" {
+	if presented == "" {
 		return false
 	}
-	// subtle.ConstantTimeCompare requires equal length
-	a := []byte(expected)
-	b := []byte(presented)
-	if len(a) != len(b) {
-		// Compare against dummy of same length to reduce length leak timing a bit
-		_ = subtle.ConstantTimeCompare(a, a)
+	got := hashClientKey(salt, presented)
+	if len(got) != len(want) {
 		return false
 	}
-	return subtle.ConstantTimeCompare(a, b) == 1
+	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
 // ExtractClientKeyFromRequest pulls the key from common client headers.
@@ -170,14 +228,9 @@ func FormatClientKeyPath() string {
 	return p
 }
 
-// EnsureClientKeyConfigured is a helper error message.
-func EnsureClientKeyConfigured() error {
-	k, _, err := LoadOrCreateClientKey()
-	if err != nil {
-		return err
-	}
-	if k == "" {
-		return fmt.Errorf("client API key missing")
-	}
-	return nil
+// ClientKeyConfigured reports whether a valid client-key verifier is on disk.
+// Never includes the plaintext key (it is not stored).
+func ClientKeyConfigured() bool {
+	v, err := LoadClientKeyVerifier()
+	return err == nil && v != ""
 }

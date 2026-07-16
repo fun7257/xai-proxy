@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1.7
 #
 # Multi-stage production image for xai-proxy.
-# Build:  docker build -t xai-proxy:local .
-# Login:  docker run --rm -it -v xai-data:/data xai-proxy:local login --no-browser
-# Serve:  docker run --rm -p 127.0.0.1:8645:8645 -v xai-data:/data xai-proxy:local
+# Build:     docker build -t xai-proxy:local .
+# Generate:  docker run --rm -v xai-data:/data xai-proxy:local generate
+# Login:     docker run --rm -it -v xai-data:/data xai-proxy:local login --no-browser
+# Serve:     docker run --rm -p 127.0.0.1:7257:7257 -v xai-data:/data xai-proxy:local
 
 ARG GO_VERSION=1.26.5
 
@@ -58,13 +59,13 @@ ENV XAI_PROXY_HOME=/data \
 
 # Bind 0.0.0.0 so host port publish works. Prefer publishing only to host loopback.
 # /v1/* still requires the local client API key (see client_key under XAI_PROXY_HOME).
-EXPOSE 8645
+EXPOSE 7257
 
-# start may wait for device-code OAuth before listening; allow a long start window.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=3 \
-    CMD wget -qO- http://127.0.0.1:8645/health >/dev/null || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:7257/health >/dev/null || exit 1
 
 ENTRYPOINT ["/usr/local/bin/xai-proxy"]
-# First boot: device login (--no-browser) if no tokens, then serve automatically.
-# --i-understand-no-client-auth = allow non-loopback bind (not "disable client key").
-CMD ["start", "--host", "0.0.0.0", "--port", "8645", "--no-browser", "--i-understand-no-client-auth"]
+# Default: serve only (run generate + login in separate steps first).
+# --i-understand-non-loopback-bind: allow 0.0.0.0 so published ports work.
+# Client API key auth on /v1/* remains required (see xai-proxy generate).
+CMD ["serve", "--host", "0.0.0.0", "--port", "7257", "--i-understand-non-loopback-bind"]

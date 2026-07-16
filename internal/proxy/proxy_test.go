@@ -66,7 +66,7 @@ func rewriteToUpstream(upstream *httptest.Server) *http.Client {
 func newProxyServer(t *testing.T, mgr *credential.Manager, upstream *httptest.Server) *httptest.Server {
 	t.Helper()
 	// Direct forwarder tests (middleware applied separately in server tests).
-	cfg := Config{Manager: mgr, Upstream: rewriteToUpstream(upstream), ClientAPIKey: "sk-xai-test"}
+	cfg := Config{Manager: mgr, Upstream: rewriteToUpstream(upstream)}
 	return httptest.NewServer(http.HandlerFunc(cfg.HandleProxyWithRetry))
 }
 
@@ -77,10 +77,14 @@ func TestServer_ClientAuthRequired(t *testing.T) {
 	defer upstream.Close()
 	_, mgr := setupTokens(t)
 	const clientKey = "sk-xai-local-test-key-aaaa"
+	verifier, err := store.FormatClientKeyVerifier(clientKey)
+	if err != nil {
+		t.Fatal(err)
+	}
 	s := NewServerWithUpstream(mgr, rewriteToUpstream(upstream), Options{
-		Host:         "127.0.0.1",
-		Port:         0,
-		ClientAPIKey: clientKey,
+		Host:              "127.0.0.1",
+		Port:              0,
+		ClientKeyVerifier: verifier,
 	})
 	// Use mux via httptest with ListenAndServe not needed — wrap Handler
 	ts := httptest.NewServer(s.http.Handler)

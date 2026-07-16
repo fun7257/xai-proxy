@@ -13,12 +13,13 @@
 
 | 层 | 凭证 | 方向 | 存储 |
 |----|------|------|------|
-| 本地客户端 | `client_key`（`sk-xai-…`） | 客户端 → proxy | `~/.xai-proxy/client_key` 或 `XAI_PROXY_CLIENT_KEY` |
+| 本地客户端 | `sk-xai-…`（明文仅在 generate 时出现） | 客户端 → proxy | 磁盘：`client_key` 中加盐 SHA-256（仅最新） |
 | 上游 OAuth | access / refresh | proxy → xAI | `~/.xai-proxy/tokens.json` |
 
-- `/v1/*`：校验 client key → 剥离客户端鉴权头 → 挂 OAuth Bearer 转发
+- `/v1/*`：对提交的 key 做同样 hash → constant-time 与磁盘校验串比较 → 剥离客户端鉴权头 → 挂 OAuth Bearer
 - `/health`、`/ready`：开放（探针）
-- CLI：`xai-proxy key show` / `key regenerate`
+- CLI：`xai-proxy generate`（覆盖旧校验串；明文只在 stdout **展示一次**，磁盘不存明文）
+- 校验串格式：`v1$sha256$<salt_hex>$<hash_hex>`（stdlib `crypto/sha256`）
 
 ## 分层
 
@@ -27,7 +28,7 @@
 3. **Credential manager**（`internal/credential`）— `GetBearer` / `ForceRefresh` / `Status`  
 4. **Proxy**（`internal/proxy`）— `net/http` 透传转发 + path allowlist + client auth  
 5. **Outbound**（`internal/outbound`）— HTTP/SOCKS 出站代理策略  
-6. **CLI**（`internal/cli`）— `start` / `login` / `serve` / `key` / …
+6. **CLI**（`internal/cli`）— `generate` / `login` / `serve` / `status` / …
 
 ## 路径策略
 
@@ -82,10 +83,9 @@ Refresh：单次使用、原子写回；**403** = 档位拒绝；`invalid_grant`
 ## CLI
 
 ```text
-xai-proxy [--proxy URL] start   [options]   # 无 token 则 login，再 serve
+xai-proxy generate                          # 生成 client key（覆盖；只展示一次）
 xai-proxy [--proxy URL] login   [--no-browser] [--proxy URL]
 xai-proxy [--proxy URL] serve   [--host ...] [--port ...] [--proxy URL]
-xai-proxy key show | key regenerate
 xai-proxy status | logout | version
 ```
 
@@ -104,9 +104,8 @@ xai-proxy status | logout | version
 | 路径 / 变量 | 用途 |
 |-------------|------|
 | `~/.xai-proxy/tokens.json` | OAuth tokens（`0600`） |
-| `~/.xai-proxy/client_key` | 本地客户端密钥（`0600`） |
+| `~/.xai-proxy/client_key` | 仅加盐 SHA-256 校验串（`0600`）；每次 `generate` 覆盖 |
 | `XAI_PROXY_HOME` | 覆盖配置目录 |
-| `XAI_PROXY_CLIENT_KEY` | 覆盖客户端密钥（可选） |
 
 ## 技术栈
 

@@ -41,7 +41,7 @@
 | 客户端鉴权 | **`/v1/*` 强制**（本地 API key，constant-time 比较） |
 | 无 key 开放 | 仅 `/health`、`/ready`（探针） |
 | Token 文件 | `~/.xai-proxy/tokens.json` 模式 `0600`，目录 `0700` |
-| Client key 文件 | `~/.xai-proxy/client_key` 模式 `0600`（或 `XAI_PROXY_CLIENT_KEY`） |
+| Client key 文件 | `~/.xai-proxy/client_key` 模式 `0600` — 仅加盐 SHA-256（非明文）；每次 `generate` 覆盖 |
 | 上游传输 | 仅 HTTPS |
 | Host 钉死 | discovery / token / inference 必须为 `*.x.ai` |
 | 日志 | 永不记录 access / refresh token |
@@ -53,11 +53,11 @@
 绑定 `0.0.0.0`（或任何非回环地址）需要：
 
 ```bash
-xai-proxy serve --host 0.0.0.0 --i-understand-no-client-auth
+xai-proxy serve --host 0.0.0.0 --i-understand-non-loopback-bind
 ```
 
 仅在受信网络、VPN 或**自带鉴权**的反向代理后使用。  
-`--i-understand-no-client-auth` 表示允许**非回环 bind**，**不是**关闭本地 client key — `/v1/*` 仍需 client key。
+`--i-understand-non-loopback-bind` 只表示允许**非回环监听**；`/v1/*` **始终**需要本地 client API key。
 
 ## OAuth 凭证
 

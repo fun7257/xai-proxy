@@ -46,7 +46,7 @@ key file and prefer loopback binds.
 | Client authentication | **Required** on `/v1/*` (local API key, constant-time compare) |
 | Open without key | `/health`, `/ready` only (probes) |
 | Token file | `~/.xai-proxy/tokens.json` mode `0600`, dir `0700` |
-| Client key file | `~/.xai-proxy/client_key` mode `0600` (or `XAI_PROXY_CLIENT_KEY`) |
+| Client key file | `~/.xai-proxy/client_key` mode `0600` — salted SHA-256 only (not the secret); each `generate` overwrites |
 | Upstream transport | HTTPS only |
 | Host pin | discovery / token / inference must be `*.x.ai` |
 | Logging | never logs access or refresh tokens |
@@ -58,12 +58,12 @@ key file and prefer loopback binds.
 Binding `0.0.0.0` (or any non-loopback address) requires:
 
 ```bash
-xai-proxy serve --host 0.0.0.0 --i-understand-no-client-auth
+xai-proxy serve --host 0.0.0.0 --i-understand-non-loopback-bind
 ```
 
 Do this only behind a trusted network, VPN, or reverse proxy **with its own auth**.
-`--i-understand-no-client-auth` acknowledges **non-loopback bind**, not “no
-local client API key” — `/v1/*` still requires the client key.
+`--i-understand-non-loopback-bind` only acknowledges **non-loopback listen**;
+`/v1/*` still always requires the local client API key.
 
 ## OAuth credentials
 
