@@ -3,7 +3,7 @@
 面向 macOS 上的 **Apple Container**（`container` CLI）。  
 本项目定位为**本机开发者工具**，不是多租户公网网关。安全边界见 [SECURITY.md](../SECURITY.md)。
 
-Dockerfile 是标准 OCI 多阶段构建；**不需要** docker compose。
+Dockerfile 是标准 OCI 多阶段构建，用 `container build` / `container run` 即可。
 
 | 项 | 值 |
 |----|-----|
@@ -215,5 +215,6 @@ make container-stop     # stop + delete
 
 - [SECURITY.md](../SECURITY.md) — 开源定位与安全策略  
 - [SECURITY model](SECURITY.md) — 威胁模型与控制  
-- [DOCKER.md](DOCKER.md) — 可选：Docker Engine 简要命令（非 compose）  
+- [DOCKER.md](DOCKER.md) — 可选：Docker Engine 简要命令  
+
 - [example/](../example/) — 全 path 请求示例  

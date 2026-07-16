@@ -56,7 +56,7 @@ make build
 
 ### Container (local always-on)
 
-On **macOS**, use Apple Container (`container` CLI) — no Compose:
+On **macOS**, use Apple Container (`container` CLI):
 
 ```bash
 container system start && container builder start

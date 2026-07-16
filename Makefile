@@ -26,7 +26,7 @@ vet: check-go
 clean:
 	rm -f $(BINARY)
 
-# --- Apple Container / OCI (no compose) ---
+# --- Apple Container / OCI ---
 # Requires: container system start; container builder start (first build)
 container-build:
 	container build -t $(IMAGE) -f Dockerfile \

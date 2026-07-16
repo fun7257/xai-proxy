@@ -56,8 +56,8 @@ WORKDIR /data
 ENV XAI_PROXY_HOME=/data \
     TZ=UTC
 
-# Container must bind 0.0.0.0 so Docker port publish works. Host mapping should
-# still prefer 127.0.0.1:8645:8645 (see docker-compose.yml) — no client auth.
+# Container must bind 0.0.0.0 so port publish works. Prefer host-side bind to
+# loopback when the runtime supports it — no client auth.
 EXPOSE 8645
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

@@ -43,11 +43,11 @@ Do this only behind a trusted network, VPN, or reverse proxy **with its own auth
 
 ### Docker
 
-The container process binds `0.0.0.0:8645` (Docker NAT requirement) **with**
-`--i-understand-no-client-auth`. Compose defaults to publishing only
-`127.0.0.1:8645:8645` on the host. Do not change that to `0.0.0.0:8645` on a
-shared machine without an outer auth layer. Token volume `xai-proxy-data` is
-secret material — restrict Docker volume access.
+The container process binds `0.0.0.0:8645` (so host port publish works) **with**
+`--i-understand-no-client-auth`. Prefer publishing only to the host loopback
+when the runtime allows it. Do not expose the proxy port on a shared network
+without an outer auth layer. Token data under the host volume (e.g.
+`~/.xai-proxy-container`) is secret material.
 
 ## OAuth credentials
 

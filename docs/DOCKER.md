@@ -3,8 +3,6 @@
 标准 **Docker Engine** 使用同一份 `Dockerfile`。  
 **macOS 推荐优先阅读 [CONTAINER.md](CONTAINER.md)**（Apple Container，已实测）。
 
-不需要 docker compose。
-
 ## Build
 
 ```bash

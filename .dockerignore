@@ -9,7 +9,6 @@ xai-proxy
 example
 docs
 Dockerfile*
-docker-compose*.yml
 .dockerignore
 Makefile
 .DS_Store
