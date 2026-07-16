@@ -19,9 +19,9 @@ It is **not**:
 | Docker published as `127.0.0.1:8645` only | Shared LAN bind with no extra auth |
 | One human operator, one OAuth login | Untrusted multi-user access to the proxy port |
 
-**There is no client authentication** on the proxy. Anyone who can open a TCP
-connection to the listen address can use **your** subscription quota (chat,
-image, TTS/STT, video, etc.).
+**Local client authentication is required** for `/v1/*` (`Authorization: Bearer
+<client_key>`). Anyone with the key **and** network reachability can use
+**your** subscription quota. `/health` and `/ready` remain open for probes.
 
 ## Reporting vulnerabilities
 

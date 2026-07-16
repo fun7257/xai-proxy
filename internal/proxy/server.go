@@ -25,9 +25,10 @@ type Server struct {
 
 // Options for Serve.
 type Options struct {
-	Host   string
-	Port   int
-	Logger *slog.Logger
+	Host         string
+	Port         int
+	Logger       *slog.Logger
+	ClientAPIKey string // local shared secret for /v1/*
 }
 
 // NewServer builds a proxy server. manager must be non-nil.
@@ -46,19 +47,21 @@ func NewServerWithUpstream(mgr *credential.Manager, upstream *http.Client, opt O
 		opt.Port = 8645
 	}
 	cfg := Config{
-		Manager:  mgr,
-		Logger:   opt.Logger,
-		Upstream: upstream,
+		Manager:      mgr,
+		Logger:       opt.Logger,
+		Upstream:     upstream,
+		ClientAPIKey: strings.TrimSpace(opt.ClientAPIKey),
 	}
 	s := &Server{cfg: cfg, host: opt.Host, port: opt.Port}
 	mux := http.NewServeMux()
+	// Liveness / readiness: no client key (probes, container healthcheck).
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /ready", s.handleReady)
-	mux.HandleFunc("/v1/", s.cfg.HandleProxyWithRetry)
-	// Also exact /v1 without trailing content
-	mux.HandleFunc("/v1", func(w http.ResponseWriter, r *http.Request) {
+	// All API traffic requires the local client API key.
+	mux.HandleFunc("/v1/", requireClientAuth(cfg.ClientAPIKey, s.cfg.HandleProxyWithRetry))
+	mux.HandleFunc("/v1", requireClientAuth(cfg.ClientAPIKey, func(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotFound, "use /v1/<path> e.g. /v1/chat/completions", "path_not_allowed")
-	})
+	}))
 
 	s.http = &http.Server{
 		Addr:              net.JoinHostPort(opt.Host, fmt.Sprintf("%d", opt.Port)),

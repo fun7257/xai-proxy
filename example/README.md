@@ -3,8 +3,8 @@
 Copy-paste samples for the **local developer proxy** at
 `http://127.0.0.1:8645/v1/...`.
 
-These examples assume a private workstation bind. Do not point untrusted
-networks at the proxy — it has **no client authentication**.
+These examples require the **local client API key**
+(`Authorization: Bearer …`, see `xai-proxy key show` or `XAI_PROXY_CLIENT_KEY`).
 
 Prerequisites:
 

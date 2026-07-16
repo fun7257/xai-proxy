@@ -16,12 +16,12 @@ The proxy attaches your OAuth bearer and **pass-through** forwards to
 | Do | Don’t |
 |----|--------|
 | Bind **127.0.0.1** (default) | Expose the port to the public internet |
-| Use Docker with host map `127.0.0.1:8645` only | Publish `0.0.0.0:8645` on a shared host |
-| Treat `~/.xai-proxy/tokens.json` as a secret | Commit tokens, `.env`, or volume dumps |
-| Put auth **in front** if you must share on a network | Assume the proxy authenticates clients |
+| Use the **local client API key** on every `/v1/*` call | Call `/v1` without `Authorization` |
+| Treat `tokens.json` **and** `client_key` as secrets | Commit keys, `.env`, or volume dumps |
+| Keep client key off shared hosts | Share the key like a password |
 
-**No client authentication.** Any process that can reach the listen socket can
-spend **your** SuperGrok / OAuth quota (chat, images, TTS/STT, video).
+**Local client auth is required** on `/v1/*`: `Authorization: Bearer <client_key>`.  
+`/health` and `/ready` stay open for probes. Upstream OAuth is separate (attached by the proxy).
 
 OAuth uses a **public** device-code client id (same class of flow as common
 Grok/Hermes-style CLI tools). xAI may change allowlists or terms at any time;
@@ -90,7 +90,12 @@ Copy-paste request samples for **every allowed path** (by category): **[example/
 | Client setting | Value |
 |----------------|--------|
 | Base URL | `http://127.0.0.1:8645/v1` |
-| API Key | anything (ignored) |
+| API Key | **local client key** (`xai-proxy key show`) |
+
+```bash
+export XAI_PROXY_CLIENT_KEY="$(xai-proxy key show 2>/dev/null | head -1)"
+# or: cat ~/.xai-proxy/client_key
+```
 
 ## Path policy
 
@@ -123,29 +128,36 @@ Body size limit: **100 MiB** (media / data-URI / STT upload).
 ### Examples
 
 ```bash
+KEY=$(xai-proxy key show 2>/dev/null | head -1)
+
 # Chat (xAI native; also works with OpenAI SDK)
 curl -s http://127.0.0.1:8645/v1/chat/completions \
+  -H "Authorization: Bearer $KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"grok-4.5","messages":[{"role":"user","content":"hi"}]}'
 
 # Image
 curl -s http://127.0.0.1:8645/v1/images/generations \
+  -H "Authorization: Bearer $KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"grok-imagine-image","prompt":"a red panda coding"}'
 
 # TTS (not /audio/speech)
 curl -s http://127.0.0.1:8645/v1/tts \
+  -H "Authorization: Bearer $KEY" \
   -H 'Content-Type: application/json' \
   -d '{"text":"Hello from Grok","voice_id":"Ara","language":"en"}' \
   -o speech.mp3
 
 # STT (not /audio/transcriptions)
 curl -s http://127.0.0.1:8645/v1/stt \
+  -H "Authorization: Bearer $KEY" \
   -F 'file=@./audio.wav' \
   -F 'language=en'
 
 # Video submit
 curl -s http://127.0.0.1:8645/v1/videos/generations \
+  -H "Authorization: Bearer $KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"grok-imagine-video","prompt":"waves on a beach"}'
 ```
@@ -155,9 +167,11 @@ curl -s http://127.0.0.1:8645/v1/videos/generations \
 | Path | Purpose |
 |------|---------|
 | `~/.xai-proxy/tokens.json` | OAuth tokens (`0600`) — **secret** |
+| `~/.xai-proxy/client_key` | Local client API key (`0600`) — **secret** |
 | `XAI_PROXY_HOME` | Override config directory |
+| `XAI_PROXY_CLIENT_KEY` | Optional env override for client key |
 
-Never commit tokens or Docker volume contents.
+Never commit tokens, client keys, or volume contents.
 
 ## Outbound proxy (HTTP / SOCKS)
 

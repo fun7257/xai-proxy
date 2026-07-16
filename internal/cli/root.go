@@ -40,6 +40,8 @@ func Run(args []string) int {
 	case "start":
 		// First-boot friendly: login if needed (default --no-browser), then serve.
 		return cmdStart(args[1:], proxyURL)
+	case "key":
+		return cmdKey(args[1:])
 	case "status":
 		return cmdStatus(args[1:])
 	case "logout":
@@ -99,9 +101,16 @@ Usage:
   xai-proxy [--proxy URL] start  [options]   # login if needed, then serve (container default)
   xai-proxy [--proxy URL] login  [--no-browser] [--proxy URL]
   xai-proxy [--proxy URL] serve  [--host ...] [--port ...] [--proxy URL] [--i-understand-no-client-auth]
+  xai-proxy key show | key regenerate
   xai-proxy status
   xai-proxy logout
   xai-proxy version
+
+Client auth (local API key, required on /v1/*):
+  Clients send:  Authorization: Bearer <client_key>
+  Key file:      $XAI_PROXY_HOME/client_key  (auto-created on start/serve)
+  Override:      env XAI_PROXY_CLIENT_KEY
+  /health and /ready stay open for probes
 
 start options (same as serve, plus login):
   --no-browser                 print device URL only (default: true for start)
@@ -109,7 +118,8 @@ start options (same as serve, plus login):
   --host / --port / --proxy / --i-understand-no-client-auth
 
 First run: start prints an accounts.x.ai URL; after you approve in a browser,
-tokens are saved and the API proxy starts automatically.
+tokens are saved and the API proxy starts automatically. Client API key is
+printed once when created.
 
 Outbound proxy (OAuth + API egress):
   --proxy URL     http(s)://host:port | socks5://host:port | socks5h://host:port
@@ -277,18 +287,33 @@ func runServe(host string, port int, allowRemote bool, explicitProxy string) int
 		return 2
 	}
 
+	clientKey, created, err := store.LoadOrCreateClientKey()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "client API key: %v\n", err)
+		return 1
+	}
+	if created {
+		fmt.Fprintln(os.Stderr, "Generated new local client API key (save this for your apps):")
+		fmt.Fprintf(os.Stderr, "  %s\n", clientKey)
+		fmt.Fprintf(os.Stderr, "  file: %s\n", store.FormatClientKeyPath())
+		fmt.Fprintln(os.Stderr)
+	}
+
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	srv := proxy.NewServerWithUpstream(mgr, upClient, proxy.Options{Host: host, Port: port, Logger: logger})
+	srv := proxy.NewServerWithUpstream(mgr, upClient, proxy.Options{
+		Host: host, Port: port, Logger: logger, ClientAPIKey: clientKey,
+	})
 
 	fmt.Fprintf(os.Stderr, "Starting xai-proxy\n")
 	fmt.Fprintf(os.Stderr, "  Listening on:  http://%s/v1\n", srv.Addr())
 	fmt.Fprintf(os.Stderr, "  Forwarding to: https://api.x.ai/v1 (chat + images + tts + stt + videos)\n")
 	fmt.Fprintf(os.Stderr, "  Outbound:     %s\n", outbound.Describe(explicitProxy))
-	fmt.Fprintf(os.Stderr, "  Client auth:   none (OAuth attached by proxy)\n")
+	fmt.Fprintf(os.Stderr, "  Client auth:   required on /v1/* (Bearer local key)\n")
 	fmt.Fprintf(os.Stderr, "  Body limit:    %d bytes\n\n", proxy.MaxBodyBytes)
 	fmt.Fprintf(os.Stderr, "Client config:\n")
 	fmt.Fprintf(os.Stderr, "  Base URL:  http://%s/v1\n", srv.Addr())
-	fmt.Fprintf(os.Stderr, "  API Key:   sk-local (ignored)\n")
+	fmt.Fprintf(os.Stderr, "  API Key:   %s\n", clientKey)
+	fmt.Fprintf(os.Stderr, "  (also:    xai-proxy key show)\n")
 	fmt.Fprintf(os.Stderr, "  Paths:     all xAI-native; chat also OpenAI full-compat\n")
 	fmt.Fprintf(os.Stderr, "  Chat:      /v1/chat/completions model=grok-4.5\n")
 	fmt.Fprintf(os.Stderr, "  Media:     /v1/images/* /v1/tts /v1/stt /v1/videos/...\n")
@@ -340,4 +365,42 @@ func cmdLogout(args []string) int {
 	}
 	fmt.Fprintln(os.Stderr, "Logged out. Tokens removed.")
 	return 0
+}
+
+func cmdKey(args []string) int {
+	sub := "show"
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	switch sub {
+	case "show", "":
+		k, created, err := store.LoadOrCreateClientKey()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "key: %v\n", err)
+			return 1
+		}
+		if created {
+			fmt.Fprintln(os.Stderr, "Created new client API key:")
+		}
+		fmt.Println(k)
+		fmt.Fprintf(os.Stderr, "file: %s\n", store.FormatClientKeyPath())
+		return 0
+	case "regenerate", "reset":
+		k, err := store.GenerateClientKey()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "key: %v\n", err)
+			return 1
+		}
+		if err := store.SaveClientKey(k); err != nil {
+			fmt.Fprintf(os.Stderr, "key: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(os.Stderr, "Regenerated client API key (update your clients):")
+		fmt.Println(k)
+		fmt.Fprintf(os.Stderr, "file: %s\n", store.FormatClientKeyPath())
+		return 0
+	default:
+		fmt.Fprintf(os.Stderr, "usage: xai-proxy key show | key regenerate\n")
+		return 2
+	}
 }

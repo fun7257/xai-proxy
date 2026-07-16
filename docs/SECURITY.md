@@ -15,16 +15,19 @@ Anyone who can connect to the listen socket can:
 - Invoke chat, image, TTS/STT, and video endpoints on **your** OAuth account
 - Spend SuperGrok / subscription quota and trigger billable or rate-limited usage
 
-Attack surface is therefore **network reachability of the proxy port**, not a
-missing “client API key” feature — client auth is intentionally absent for local DX.
+Attack surface is **network reachability of the proxy port** plus possession of
+the local client API key. Without the key, `/v1/*` returns 401. Protect the
+key file and prefer loopback binds.
 
 ## Controls
 
 | Control | Default |
 |---------|---------|
 | Listen address | `127.0.0.1` only (CLI) |
-| Client authentication | **None** (by design) |
+| Client authentication | **Required** on `/v1/*` (local API key, constant-time compare) |
+| Open without key | `/health`, `/ready` only (probes) |
 | Token file | `~/.xai-proxy/tokens.json` mode `0600`, dir `0700` |
+| Client key file | `~/.xai-proxy/client_key` mode `0600` (or `XAI_PROXY_CLIENT_KEY`) |
 | Upstream transport | HTTPS only |
 | Host pin | discovery / token / inference must be `*.x.ai` |
 | Logging | never logs access or refresh tokens |

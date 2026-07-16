@@ -25,4 +25,5 @@ audio.wav
 .env.*
 !.env.example
 tokens.json
+client_key
 **/.xai-proxy/

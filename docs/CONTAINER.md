@@ -145,7 +145,8 @@ container run --rm \
 
 已登录后再次 `container run ... xai-proxy:local`（默认 `start`）会检测到凭证并**直接 serve**。
 
-容器内必须绑 `0.0.0.0` 才能做端口发布。代理**不对客户端鉴权**——勿把端口暴露到不可信网络。
+容器内必须绑 `0.0.0.0` 才能做端口发布。`/v1/*` 需要本地 **client API key**
+（`xai-proxy key show` 或 volume 内 `client_key`）。首次 `start` 会生成并打印密钥。
 
 ### 探活
 

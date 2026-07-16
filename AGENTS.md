@@ -23,9 +23,9 @@
 
 ## 产品核心要点
 
-1. 不对客户端做鉴权：忽略/剥离客户端 `Authorization`，挂载 OAuth Bearer
-2. 安全边界 = 默认 bind `127.0.0.1` + tokens 文件权限；非回环须显式确认
-3. Token：`~/.xai-proxy/tokens.json`（0600），与 Hermes `auth.json` 解耦
+1. **本地客户端鉴权**：`/v1/*` 必须 `Authorization: Bearer <client_key>`；校验后剥离客户端头，再挂 OAuth Bearer 上游
+2. 安全边界 = 默认 bind `127.0.0.1` + `tokens.json` + `client_key` 权限；非回环须显式确认
+3. Token：`~/.xai-proxy/tokens.json`；客户端密钥：`client_key`（`xai-proxy key show`），与 Hermes 解耦
 4. Refresh token 单次使用：刷新后必须原子写回；文件锁 + singleflight
 5. Host 钉死：token / discovery / inference 仅 `https` + `*.x.ai`
 6. 403 refresh = 档位拒绝，不是过期；`invalid_grant` 才 quarantine / 要求 re-login
@@ -98,7 +98,7 @@ xai-proxy version
 
 ## 明确不做
 
-- 多租户 SaaS / 公网安全网关（无客户端鉴权是本机 DX 设计）
+- 多租户 SaaS / 公网身份体系（仅有本地共享密钥，不是完整用户系统）
 - 冒充 xAI 官方产品
 - 依赖 Hermes Python
 - Twitter 官方 OAuth API

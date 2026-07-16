@@ -65,8 +65,72 @@ func rewriteToUpstream(upstream *httptest.Server) *http.Client {
 
 func newProxyServer(t *testing.T, mgr *credential.Manager, upstream *httptest.Server) *httptest.Server {
 	t.Helper()
-	cfg := Config{Manager: mgr, Upstream: rewriteToUpstream(upstream)}
+	// Direct forwarder tests (middleware applied separately in server tests).
+	cfg := Config{Manager: mgr, Upstream: rewriteToUpstream(upstream), ClientAPIKey: "sk-xai-test"}
 	return httptest.NewServer(http.HandlerFunc(cfg.HandleProxyWithRetry))
+}
+
+func TestServer_ClientAuthRequired(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":1}`))
+	}))
+	defer upstream.Close()
+	_, mgr := setupTokens(t)
+	const clientKey = "sk-xai-local-test-key-aaaa"
+	s := NewServerWithUpstream(mgr, rewriteToUpstream(upstream), Options{
+		Host:         "127.0.0.1",
+		Port:         0,
+		ClientAPIKey: clientKey,
+	})
+	// Use mux via httptest with ListenAndServe not needed — wrap Handler
+	ts := httptest.NewServer(s.http.Handler)
+	defer ts.Close()
+
+	// no key
+	resp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status=%d want 401", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// wrong key
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/chat/completions", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer wrong")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// good key
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/v1/chat/completions", strings.NewReader(`{"model":"grok-4.5","messages":[]}`))
+	req.Header.Set("Authorization", "Bearer "+clientKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, b)
+	}
+
+	// health open
+	resp, err = http.Get(ts.URL + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("health %d", resp.StatusCode)
+	}
 }
 
 func TestProxy_ChatForward_StripsClientAuth(t *testing.T) {
