@@ -60,8 +60,10 @@ ENV XAI_PROXY_HOME=/data \
 # loopback when the runtime supports it — no client auth.
 EXPOSE 8645
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+# start may wait for device-code OAuth before listening; allow a long start window.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=3 \
     CMD wget -qO- http://127.0.0.1:8645/health >/dev/null || exit 1
 
 ENTRYPOINT ["/usr/local/bin/xai-proxy"]
-CMD ["serve", "--host", "0.0.0.0", "--port", "8645", "--i-understand-no-client-auth"]
+# First boot: device login (--no-browser) if no tokens, then serve automatically.
+CMD ["start", "--host", "0.0.0.0", "--port", "8645", "--no-browser", "--i-understand-no-client-auth"]

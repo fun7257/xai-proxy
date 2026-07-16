@@ -65,12 +65,12 @@ container build -t xai-proxy:local -f Dockerfile \
   --build-arg GO_VERSION=1.26.5 --build-arg VERSION=0.1.0 .
 
 mkdir -p "$HOME/.xai-proxy-container" && chmod 700 "$HOME/.xai-proxy-container"
-container run --rm -it --volume "$HOME/.xai-proxy-container:/data" \
-  --env XAI_PROXY_HOME=/data xai-proxy:local login --no-browser
-
+# Default CMD is `start`: login (--no-browser) if needed, then serve.
+# First run: watch logs for the device URL, approve in a browser.
 container run -d --name xai-proxy --publish 8645:8645 \
   --volume "$HOME/.xai-proxy-container:/data" --env XAI_PROXY_HOME=/data \
   xai-proxy:local
+container logs -f xai-proxy
 
 curl -s http://127.0.0.1:8645/health
 ```
@@ -187,11 +187,10 @@ export ALL_PROXY=socks5://127.0.0.1:1080
 ## Commands
 
 ```text
-xai-proxy [--proxy URL] login [--no-browser] [--proxy URL]
-xai-proxy [--proxy URL] serve [--host 127.0.0.1] [--port 8645] [--proxy URL]
-xai-proxy status
-xai-proxy logout
-xai-proxy version
+xai-proxy start   # login if needed (--no-browser), then serve (container default)
+xai-proxy login [--no-browser]
+xai-proxy serve
+xai-proxy status | logout | version
 ```
 
 ## Docs

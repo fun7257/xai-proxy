@@ -43,6 +43,7 @@ container-login:
 		--env XAI_PROXY_HOME=/data \
 		$(IMAGE) login --no-browser
 
+# First boot: follow logs for the device URL, then approve in a browser.
 container-run:
 	-container stop xai-proxy 2>/dev/null
 	-container delete xai-proxy 2>/dev/null
@@ -52,6 +53,7 @@ container-run:
 		--volume "$(DATA_DIR):/data" \
 		--env XAI_PROXY_HOME=/data \
 		$(IMAGE)
+	@echo "If first login: container logs -f xai-proxy  # open the printed URL"
 
 container-stop:
 	-container stop xai-proxy

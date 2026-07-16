@@ -13,26 +13,20 @@ docker build -t xai-proxy:local \
   .
 ```
 
-## Login
+## First run (login if needed, then serve)
+
+Default image command is `start` (`--no-browser` device login → write tokens → serve).
 
 ```bash
 mkdir -p "$HOME/.xai-proxy-container" && chmod 700 "$HOME/.xai-proxy-container"
 
-docker run --rm -it \
-  -v "$HOME/.xai-proxy-container:/data" \
-  -e XAI_PROXY_HOME=/data \
-  xai-proxy:local login --no-browser
-```
-
-## Run
-
-```bash
 docker run -d --name xai-proxy \
   -p 127.0.0.1:8645:8645 \
   -v "$HOME/.xai-proxy-container:/data" \
   -e XAI_PROXY_HOME=/data \
   xai-proxy:local
 
+docker logs -f xai-proxy   # open printed accounts.x.ai URL, then proxy starts
 curl -s http://127.0.0.1:8645/health
 ```
 

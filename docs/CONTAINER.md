@@ -66,23 +66,70 @@ container run --rm xai-proxy:local version
 
 ---
 
-## 3. 一次性 OAuth 登录
+## 3. 首次启动（login + serve 一条命令）
 
-设备码流程：容器打印 URL，在宿主机浏览器打开完成授权。Token 写在**宿主机目录**，勿提交 git。
+镜像默认命令是 **`start`**：没有 token 时先 **`--no-browser` 设备码登录**，授权成功并写入 `tokens.json` 后**自动 `serve`**。
+
+**第一次请前台运行**（要看到打印的 URL；`-it` 可选但日志要可见）：
 
 ```bash
 mkdir -p "$HOME/.xai-proxy-container"
 chmod 700 "$HOME/.xai-proxy-container"
 
-container run --rm -it --name xai-proxy-login \
+# 清理旧实例
+container stop xai-proxy 2>/dev/null || true
+container delete xai-proxy 2>/dev/null || true
+
+container run --name xai-proxy \
+  --publish 8645:8645 \
+  --volume "$HOME/.xai-proxy-container:/data" \
+  --env XAI_PROXY_HOME=/data \
+  xai-proxy:local
+# 等价 CMD:
+#   start --host 0.0.0.0 --port 8645 --no-browser --i-understand-no-client-auth
+```
+
+终端会出现类似：
+
+```text
+No credentials found — starting device login…
+Open: https://accounts.x.ai/oauth2/device?user_code=XXXX-XXXX
+…
+Login successful!
+  Tokens: /data/tokens.json
+Starting API proxy…
+  Listening on: http://0.0.0.0:8645/v1
+```
+
+在**本机浏览器**打开 URL 并批准后，进程会自动开始监听，无需再跑 `login` / `serve`。
+
+后台跑时请用日志看 URL：
+
+```bash
+container run -d --name xai-proxy --publish 8645:8645 \
+  --volume "$HOME/.xai-proxy-container:/data" \
+  --env XAI_PROXY_HOME=/data \
+  xai-proxy:local
+container logs -f xai-proxy    # 复制 Open: https://... 去浏览器
+```
+
+### 仅登录 / 仅服务（可选）
+
+```bash
+# 只授权
+container run --rm -it \
   --volume "$HOME/.xai-proxy-container:/data" \
   --env XAI_PROXY_HOME=/data \
   xai-proxy:local login --no-browser
+
+# 已有 token 时只 serve
+container run -d --name xai-proxy --publish 8645:8645 \
+  --volume "$HOME/.xai-proxy-container:/data" \
+  --env XAI_PROXY_HOME=/data \
+  xai-proxy:local serve --host 0.0.0.0 --port 8645 --i-understand-no-client-auth
 ```
 
-或：`make container-login`（默认 `DATA_DIR=$HOME/.xai-proxy-container`）。
-
-重新登录：对**同一 volume** 再跑一次上述命令。  
+重新授权：对同一 volume 再 `login --no-browser`，或删掉 `tokens.json` 后重新 `start`。  
 登出：
 
 ```bash
@@ -94,27 +141,9 @@ container run --rm \
 
 ---
 
-## 4. 常驻运行
+## 4. 常驻说明
 
-```bash
-# 清理旧实例（可忽略报错）
-container stop xai-proxy 2>/dev/null || true
-container delete xai-proxy 2>/dev/null || true
-
-container run -d --name xai-proxy \
-  --publish 8645:8645 \
-  --volume "$HOME/.xai-proxy-container:/data" \
-  --env XAI_PROXY_HOME=/data \
-  xai-proxy:local
-```
-
-或：`make container-run`。
-
-镜像默认 `CMD`：
-
-```text
-serve --host 0.0.0.0 --port 8645 --i-understand-no-client-auth
-```
+已登录后再次 `container run ... xai-proxy:local`（默认 `start`）会检测到凭证并**直接 serve**。
 
 容器内必须绑 `0.0.0.0` 才能做端口发布。代理**不对客户端鉴权**——勿把端口暴露到不可信网络。
 
@@ -154,10 +183,10 @@ container delete xai-proxy
 container run --rm xai-proxy:local version
 container run --rm xai-proxy:local help
 
-# 未登录应拒绝 serve
+# 未登录：纯 serve 拒绝；默认 start 会进入设备码等待
 container run --rm xai-proxy:local \
   serve --host 0.0.0.0 --port 8645 --i-understand-no-client-auth
-# 期望输出含: Not logged in
+# 期望: Not logged in
 ```
 
 ---
