@@ -1,15 +1,50 @@
 # xai-proxy
 
-Local reverse proxy for **xAI** (Grok OAuth). Log in once; any client on
-loopback can call chat **and multimodal** APIs without managing an API key.
+**Local developer tool** — a single-operator reverse proxy that logs you into
+xAI (Grok) via OAuth once, then lets any **local** OpenAI-compatible client call
+xAI’s native `/v1/*` APIs (chat **and** multimodal) without managing an API key.
 
 The proxy attaches your OAuth bearer and **pass-through** forwards to
 `https://api.x.ai/v1/*`.
 
+> **Not affiliated with xAI.** Unofficial, community-maintained software.  
+> **For your machine only** — not a multi-tenant or public API gateway.  
+> License: [MIT](LICENSE). Security model: [SECURITY.md](SECURITY.md).
+
+## Important: security & scope
+
+| Do | Don’t |
+|----|--------|
+| Bind **127.0.0.1** (default) | Expose the port to the public internet |
+| Use Docker with host map `127.0.0.1:8645` only | Publish `0.0.0.0:8645` on a shared host |
+| Treat `~/.xai-proxy/tokens.json` as a secret | Commit tokens, `.env`, or volume dumps |
+| Put auth **in front** if you must share on a network | Assume the proxy authenticates clients |
+
+**No client authentication.** Any process that can reach the listen socket can
+spend **your** SuperGrok / OAuth quota (chat, images, TTS/STT, video).
+
+OAuth uses a **public** device-code client id (same class of flow as common
+Grok/Hermes-style CLI tools). xAI may change allowlists or terms at any time;
+use at your own risk.
+
+Full threat model: [docs/SECURITY.md](docs/SECURITY.md).
+
+## What this is for
+
+- Point **Cursor / OpenAI SDKs / curl** at a local base URL during development
+- One OAuth login, automatic token refresh, native xAI paths for all modalities
+- Optional Docker for always-on local use
+
+## What this is not
+
+- An official xAI product or supported integration
+- A secure shared proxy for a team or the internet
+- A full OpenAI Audio API shim (`/audio/speech` etc. are **not** mapped)
+
 ## Requirements
 
-- Go **1.26.5**
-- SuperGrok or X Premium+ (xAI OAuth API access; some modalities may still be tier-gated upstream)
+- Go **1.26.5** (or Docker)
+- SuperGrok or X Premium+ (OAuth API access; some modalities may be tier-gated upstream)
 
 ## Install
 
@@ -19,7 +54,7 @@ make build
 # or: go build -o xai-proxy ./cmd/xai-proxy
 ```
 
-### Docker (recommended for always-on)
+### Docker (local always-on)
 
 ```bash
 docker compose build
@@ -38,7 +73,7 @@ Host port is published as **`127.0.0.1:8645` only**. Tokens live in volume
 ./xai-proxy serve   # http://127.0.0.1:8645
 ```
 
-Copy-paste request samples for **every allowed path** (by category): see **[example/](example/)**.
+Copy-paste request samples for **every allowed path** (by category): **[example/](example/)**.
 
 | Client setting | Value |
 |----------------|--------|
@@ -107,14 +142,10 @@ curl -s http://127.0.0.1:8645/v1/videos/generations \
 
 | Path | Purpose |
 |------|---------|
-| `~/.xai-proxy/tokens.json` | OAuth tokens (`0600`) |
+| `~/.xai-proxy/tokens.json` | OAuth tokens (`0600`) — **secret** |
 | `XAI_PROXY_HOME` | Override config directory |
 
-## Security
-
-- Default bind: **127.0.0.1** (no client auth)
-- Non-loopback requires `--i-understand-no-client-auth`
-- See [docs/SECURITY.md](docs/SECURITY.md) and [AGENTS.md](AGENTS.md)
+Never commit tokens or Docker volume contents.
 
 ## Commands
 
@@ -125,3 +156,21 @@ xai-proxy status
 xai-proxy logout
 xai-proxy version
 ```
+
+## Docs
+
+| Doc | Content |
+|-----|---------|
+| [SECURITY.md](SECURITY.md) | Scope, intended use, how to report issues |
+| [docs/SECURITY.md](docs/SECURITY.md) | Threat model & controls |
+| [docs/DOCKER.md](docs/DOCKER.md) | Container deployment |
+| [docs/DESIGN.md](docs/DESIGN.md) | Architecture sketch |
+| [AGENTS.md](AGENTS.md) | Contributor / agent hard constraints |
+| [example/](example/) | Full-path curl samples |
+
+## Disclaimer
+
+This software is provided **as is**, under the [MIT License](LICENSE), without
+warranty. You are responsible for complying with [xAI](https://x.ai) terms of
+service, subscription rules, and any applicable law. The authors are not
+responsible for account bans, quota use, or data you send to upstream APIs.

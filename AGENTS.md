@@ -4,9 +4,11 @@
 
 ## 项目是什么
 
+- **本机开发者工具**（单操作者、非 SaaS、非 xAI 官方产品）
 - 本机 xAI OAuth（设备码）登录 + 本地 **xAI 原生 `/v1/*` 转发代理**（聊天 + 全模态）
 - 操作者 `login` 一次后，客户端免鉴权使用（默认仅 `127.0.0.1`）
-- 协议对齐 Hermes `xai-oauth`，但**独立实现**，不依赖 hermes-agent 运行时
+- 协议对齐 Hermes 一类 `xai-oauth` 设备码流程，但**独立实现**，不依赖 hermes-agent 运行时
+- 开源定位与免责：见根目录 `README.md`、`SECURITY.md`、`LICENSE`（MIT）
 
 ## 技术硬约束
 
@@ -94,7 +96,8 @@ xai-proxy version
 
 ## 明确不做
 
-- 多租户 SaaS 用户鉴权
+- 多租户 SaaS / 公网安全网关（无客户端鉴权是本机 DX 设计）
+- 冒充 xAI 官方产品
 - 依赖 Hermes Python
 - Twitter 官方 OAuth API
 - OpenAI→xAI TTS/STT/video 假兼容 shim

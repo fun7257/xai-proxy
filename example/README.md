@@ -1,6 +1,10 @@
 # xai-proxy request examples
 
-All samples hit the **local proxy** at `http://127.0.0.1:8645/v1/...`.
+Copy-paste samples for the **local developer proxy** at
+`http://127.0.0.1:8645/v1/...`.
+
+These examples assume a private workstation bind. Do not point untrusted
+networks at the proxy — it has **no client authentication**.
 
 Prerequisites:
 

@@ -1,7 +1,10 @@
 # Docker deployment
 
-Production-oriented packaging for **xai-proxy**: multi-stage build, non-root
+**Local developer tool packaging** for **xai-proxy**: multi-stage build, non-root
 user, read-only rootfs, host-loopback port publish, persistent OAuth volume.
+
+This is for always-on **workstation** use — not a multi-tenant public gateway.
+See [SECURITY.md](../SECURITY.md) and [SECURITY model](SECURITY.md).
 
 ## Images
 
