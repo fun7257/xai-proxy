@@ -1,0 +1,18 @@
+# Build context hygiene
+.git
+.gitignore
+**/*_test.go
+**/testdata
+xai-proxy
+*.md
+!go.mod
+example
+docs
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+Makefile
+.DS_Store
+*.log
+*.mp3
+*.wav

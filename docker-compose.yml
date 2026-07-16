@@ -1,0 +1,68 @@
+# Mature local/prod-ish deployment for xai-proxy.
+#
+# First-time OAuth (device code; open URL on your laptop):
+#   docker compose run --rm xai-proxy login --no-browser
+#
+# Start proxy (loopback-only on the host NIC):
+#   docker compose up -d
+#
+# Client base URL: http://127.0.0.1:8645/v1
+
+name: xai-proxy
+
+services:
+  xai-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GO_VERSION: "1.26.5"
+        VERSION: "${VERSION:-0.1.0}"
+    image: xai-proxy:${IMAGE_TAG:-local}
+    container_name: xai-proxy
+    restart: unless-stopped
+
+    # Prefer binding the published port to host loopback only — the container
+    # process listens on 0.0.0.0 (required for Docker NAT) and has no client auth.
+    ports:
+      - "127.0.0.1:8645:8645"
+
+    environment:
+      XAI_PROXY_HOME: /data
+      TZ: UTC
+      # Optional upstream override (must stay on *.x.ai):
+      # XAI_BASE_URL: https://api.x.ai/v1
+
+    volumes:
+      # Persist OAuth tokens across restarts (mode enforced by the app: 0600).
+      - xai-proxy-data:/data
+
+    # Hardening defaults
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # No extra Linux capabilities required for a static reverse proxy.
+    pids_limit: 256
+    mem_limit: 512m
+    cpus: 1.0
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8645/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  xai-proxy-data:
+    name: xai-proxy-data

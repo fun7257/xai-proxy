@@ -1,0 +1,27 @@
+# Binaries
+/xai-proxy
+*.exe
+*.test
+*.out
+
+# Local / runtime
+/tmp/
+*.log
+*.mp3
+*.wav
+speech.mp3
+audio.wav
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Secrets / local data (never commit OAuth tokens)
+.env
+.env.*
+!.env.example
+tokens.json
+**/.xai-proxy/

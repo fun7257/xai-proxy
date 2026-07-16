@@ -1,0 +1,226 @@
+package proxy
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"strings"
+	"time"
+
+	"xai-proxy/internal/auth"
+	"xai-proxy/internal/credential"
+)
+
+// Config for the reverse proxy.
+type Config struct {
+	Manager *credential.Manager
+	// AllowedPaths, if non-nil, overrides PathAllowed with an exact map (tests only).
+	AllowedPaths map[string]struct{}
+	// MaxBodyBytes overrides MaxBodyBytes default when > 0.
+	MaxBodyBytes int64
+	Logger       *slog.Logger
+	// Upstream client — no total Timeout so streams can run long.
+	Upstream *http.Client
+}
+
+func (c *Config) logger() *slog.Logger {
+	if c.Logger != nil {
+		return c.Logger
+	}
+	return slog.Default()
+}
+
+func (c *Config) upstreamClient() *http.Client {
+	if c.Upstream != nil {
+		return c.Upstream
+	}
+	return &http.Client{
+		Timeout: 0,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   15 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			ResponseHeaderTimeout: 300 * time.Second,
+		},
+	}
+}
+
+func (c *Config) bodyLimit() int64 {
+	if c.MaxBodyBytes > 0 {
+		return c.MaxBodyBytes
+	}
+	return MaxBodyBytes
+}
+
+func (c *Config) isAllowed(rel string) bool {
+	if c.AllowedPaths != nil {
+		return pathAllowed(rel, c.AllowedPaths)
+	}
+	return PathAllowed(rel)
+}
+
+// HandleProxyWithRetry implements credential attach + one 401 retry.
+// Body is passed through unchanged (JSON or multipart); only Authorization is replaced.
+func (c *Config) HandleProxyWithRetry(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	rel := strings.TrimPrefix(r.URL.Path, "/v1")
+	if rel == "" {
+		rel = "/"
+	}
+	rel = normalizePath(rel)
+
+	if !c.isAllowed(rel) {
+		msg := fmt.Sprintf(
+			"Path /v1%s is not forwarded. %s. OpenAI /audio/* is not shimmed — use xAI native /v1/tts and /v1/stt.",
+			rel, AllowedPathSummary(),
+		)
+		if IsOpenAIAudioShimRejected(rel) {
+			msg = fmt.Sprintf(
+				"Path /v1%s is OpenAI-only and is not mapped. Use xAI native /v1/tts (TTS) or /v1/stt (STT).",
+				rel,
+			)
+		}
+		writeJSONError(w, http.StatusNotFound, msg, "path_not_allowed")
+		return
+	}
+
+	// Read body once so 401 refresh can retry. Preserves multipart bytes as-is.
+	limit := c.bodyLimit()
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	if err != nil {
+		writeJSONError(w, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("request body too large or unreadable (max %d bytes)", limit),
+			"body_error")
+		return
+	}
+
+	bearer, baseURL, err := c.Manager.GetBearer(r.Context())
+	if err != nil {
+		c.writeAuthError(w, err)
+		return
+	}
+
+	status, streamed, err := c.doUpstream(r.Context(), w, r, rel, body, bearer, baseURL, true)
+	if err != nil && !streamed {
+		c.writeUpstreamError(w, err)
+		return
+	}
+	if status == http.StatusUnauthorized && !streamed {
+		bearer, baseURL, err = c.Manager.ForceRefresh(r.Context())
+		if err != nil {
+			c.writeAuthError(w, err)
+			return
+		}
+		status, streamed, err = c.doUpstream(r.Context(), w, r, rel, body, bearer, baseURL, false)
+		if err != nil && !streamed {
+			c.writeUpstreamError(w, err)
+			return
+		}
+	}
+
+	c.logger().Info("proxy request",
+		"method", r.Method,
+		"path", rel,
+		"upstream_status", status,
+		"latency_ms", time.Since(start).Milliseconds(),
+		"body_bytes", len(body),
+	)
+}
+
+// doUpstream performs one upstream call. If peekAuth is true and status is 401,
+// it does not write the body (caller may retry). Otherwise streams the response
+// (JSON, binary audio, SSE).
+func (c *Config) doUpstream(ctx context.Context, w http.ResponseWriter, r *http.Request, rel string, body []byte, bearer, baseURL string, peekAuth bool) (status int, streamed bool, err error) {
+	// base_url is https://api.x.ai/v1; rel is /chat/completions → full upstream path.
+	upURL := strings.TrimRight(baseURL, "/") + rel
+	if r.URL.RawQuery != "" {
+		upURL += "?" + r.URL.RawQuery
+	}
+
+	var bodyReader io.Reader
+	if len(body) > 0 {
+		bodyReader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, r.Method, upURL, bodyReader)
+	if err != nil {
+		return 0, false, err
+	}
+	// Copy client headers except hop-by-hop and Authorization (replaced below).
+	// Multipart Content-Type (with boundary) is preserved as-is — no body rewrite.
+	copyRequestHeaders(req.Header, r.Header)
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	// Only default Content-Type when client sent none and body is non-empty.
+	// Never force application/json over multipart/form-data.
+	if len(body) > 0 && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.ContentLength = int64(len(body))
+
+	resp, err := c.upstreamClient().Do(req)
+	if err != nil {
+		return 0, false, err
+	}
+
+	if peekAuth && resp.StatusCode == http.StatusUnauthorized {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, false, nil
+	}
+
+	copyResponseHeaders(w.Header(), resp.Header)
+	w.WriteHeader(resp.StatusCode)
+	streamed = true
+	defer resp.Body.Close()
+
+	buf := make([]byte, 32*1024)
+	flusher, canFlush := w.(http.Flusher)
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return resp.StatusCode, true, werr
+			}
+			if canFlush {
+				flusher.Flush()
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return resp.StatusCode, true, readErr
+		}
+	}
+	return resp.StatusCode, true, nil
+}
+
+func (c *Config) writeAuthError(w http.ResponseWriter, err error) {
+	if auth.IsTierDenied(err) {
+		writeJSONError(w, http.StatusForbidden, err.Error(), "upstream_tier_denied")
+		return
+	}
+	if e, ok := err.(*auth.Error); ok && e.ReloginRequired {
+		writeJSONError(w, http.StatusServiceUnavailable, err.Error(), "auth_required")
+		return
+	}
+	writeJSONError(w, http.StatusBadGateway, err.Error(), "upstream_auth_failed")
+}
+
+func (c *Config) writeUpstreamError(w http.ResponseWriter, err error) {
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		writeJSONError(w, http.StatusGatewayTimeout, "upstream request timed out", "upstream_timeout")
+		return
+	}
+	writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("upstream connection failed: %v", err), "upstream_unreachable")
+}
