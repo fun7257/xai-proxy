@@ -54,13 +54,12 @@ make build
 # or: go build -o xai-proxy ./cmd/xai-proxy
 ```
 
-### Container (local always-on, Apple Container on macOS)
+### Container (local always-on)
 
-Dockerfile is OCI-compatible; no Compose required. On macOS prefer `container`:
+On **macOS**, use Apple Container (`container` CLI) — no Compose:
 
 ```bash
-container system start
-container builder start   # first time / if builder down
+container system start && container builder start
 
 container build -t xai-proxy:local -f Dockerfile \
   --build-arg GO_VERSION=1.26.5 --build-arg VERSION=0.1.0 .
@@ -76,7 +75,8 @@ container run -d --name xai-proxy --publish 8645:8645 \
 curl -s http://127.0.0.1:8645/health
 ```
 
-Full guide: [docs/DOCKER.md](docs/DOCKER.md).
+- **Apple Container 完整指南**：[docs/CONTAINER.md](docs/CONTAINER.md)  
+- Docker Engine 可选：[docs/DOCKER.md](docs/DOCKER.md)
 
 ## Usage
 
@@ -175,7 +175,8 @@ xai-proxy version
 |-----|---------|
 | [SECURITY.md](SECURITY.md) | Scope, intended use, how to report issues |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model & controls |
-| [docs/DOCKER.md](docs/DOCKER.md) | Container deployment |
+| [docs/CONTAINER.md](docs/CONTAINER.md) | **Apple Container** 部署（推荐 macOS） |
+| [docs/DOCKER.md](docs/DOCKER.md) | Docker Engine 简要命令（可选） |
 | [docs/DESIGN.md](docs/DESIGN.md) | Architecture sketch |
 | [AGENTS.md](AGENTS.md) | Contributor / agent hard constraints |
 | [example/](example/) | Full-path curl samples |

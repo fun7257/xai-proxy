@@ -45,5 +45,6 @@ bug bounty.
 
 ## Operator hardening
 
-See [docs/SECURITY.md](docs/SECURITY.md) for threat model, token storage, host
-pinning, and Docker notes.
+See [docs/SECURITY.md](docs/SECURITY.md) for threat model, token storage, and
+host pinning. For running in containers on macOS, see
+[docs/CONTAINER.md](docs/CONTAINER.md).
