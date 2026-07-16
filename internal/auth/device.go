@@ -36,7 +36,7 @@ type TokenResponse struct {
 // RequestDeviceCode starts the device-code flow.
 func RequestDeviceCode(ctx context.Context, client *http.Client) (*DeviceCodeResponse, error) {
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = outboundClient(30 * time.Second)
 	}
 	form := url.Values{}
 	form.Set("client_id", ClientID)
@@ -73,7 +73,7 @@ func RequestDeviceCode(ctx context.Context, client *http.Client) (*DeviceCodeRes
 // PollDeviceToken polls until the user approves or the code expires.
 func PollDeviceToken(ctx context.Context, client *http.Client, tokenEndpoint, deviceCode string, expiresIn, interval int) (*TokenResponse, error) {
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = outboundClient(30 * time.Second)
 	}
 	if err := ValidateXAIURL(tokenEndpoint, "token_endpoint"); err != nil {
 		return nil, NewError(CodeDiscoveryInvalid, err.Error(), true)

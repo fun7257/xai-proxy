@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"xai-proxy/internal/auth"
+	"xai-proxy/internal/outbound"
 	"xai-proxy/internal/store"
 )
 
@@ -30,9 +31,16 @@ type Manager struct {
 }
 
 // NewManager creates a credential manager.
+// When client is nil, uses the process outbound proxy policy (CLI --proxy / env).
 func NewManager(client *http.Client) *Manager {
 	if client == nil {
-		client = &http.Client{Timeout: time.Duration(auth.DefaultRefreshTimeoutSeconds) * time.Second}
+		c, err := outbound.NewClient(outbound.Options{
+			Timeout: time.Duration(auth.DefaultRefreshTimeoutSeconds) * time.Second,
+		})
+		if err != nil {
+			c = &http.Client{Timeout: time.Duration(auth.DefaultRefreshTimeoutSeconds) * time.Second}
+		}
+		client = c
 	}
 	return &Manager{client: client}
 }

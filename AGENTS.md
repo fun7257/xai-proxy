@@ -19,7 +19,7 @@
    - 能用 stdlib 解决的禁止加依赖
    - 确需引入：优先 `golang.org/x/*`，其次高星、持续维护的事实标准库
    - 新增 `require` 须说明：为何 stdlib 不够 + 维护现状
-4. MVP 目标：`go.mod` 无外部 require，或仅官方 x 包
+4. 依赖：默认零第三方；出站 SOCKS 允许 `golang.org/x/net`（官方 x 包）
 
 ## 产品核心要点
 
@@ -87,12 +87,14 @@
 ## CLI
 
 ```text
-xai-proxy login [--no-browser]
-xai-proxy serve [--host 127.0.0.1] [--port 8645]
+xai-proxy [--proxy URL] login [--no-browser] [--proxy URL]
+xai-proxy [--proxy URL] serve [--host ...] [--port ...] [--proxy URL]
 xai-proxy status
 xai-proxy logout
 xai-proxy version
 ```
+
+出站代理（OAuth+API）：`--proxy` / `XAI_PROXY_OUTBOUND` / `ALL_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY`；实现见 `internal/outbound`。
 
 ## 明确不做
 

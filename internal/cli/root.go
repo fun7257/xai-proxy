@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"xai-proxy/internal/auth"
 	"xai-proxy/internal/credential"
+	"xai-proxy/internal/outbound"
 	"xai-proxy/internal/proxy"
 	"xai-proxy/internal/store"
 )
@@ -23,15 +25,18 @@ var Version = "0.1.0"
 
 // Run is the CLI entrypoint.
 func Run(args []string) int {
+	// Global: xai-proxy --proxy URL <cmd> ...
+	proxyURL, args := peelProxyFlag(args)
+
 	if len(args) < 1 {
 		printUsage()
 		return 2
 	}
 	switch args[0] {
 	case "login":
-		return cmdLogin(args[1:])
+		return cmdLogin(args[1:], proxyURL)
 	case "serve":
-		return cmdServe(args[1:])
+		return cmdServe(args[1:], proxyURL)
 	case "status":
 		return cmdStatus(args[1:])
 	case "logout":
@@ -49,12 +54,49 @@ func Run(args []string) int {
 	}
 }
 
+func peelProxyFlag(args []string) (proxyURL string, rest []string) {
+	rest = args
+	for len(rest) > 0 {
+		a := rest[0]
+		if a == "--proxy" && len(rest) > 1 {
+			proxyURL = rest[1]
+			rest = rest[2:]
+			continue
+		}
+		if strings.HasPrefix(a, "--proxy=") {
+			proxyURL = strings.TrimPrefix(a, "--proxy=")
+			rest = rest[1:]
+			continue
+		}
+		break
+	}
+	return strings.TrimSpace(proxyURL), rest
+}
+
+func applyProxy(explicit string) error {
+	// Subcommand --proxy overrides global peel if both set (caller passes merged).
+	if explicit != "" {
+		if _, err := outbound.ClassifyProxyURL(explicit); err != nil {
+			return err
+		}
+		outbound.SetDefaultProxyURL(explicit)
+		return nil
+	}
+	// Env-only: validate if set
+	if u := outbound.ResolveProxyURL(""); u != "" {
+		if _, err := outbound.ClassifyProxyURL(u); err != nil {
+			return fmt.Errorf("outbound proxy from environment: %w", err)
+		}
+	}
+	return nil
+}
+
 func printUsage() {
 	fmt.Fprintf(os.Stderr, `xai-proxy — local xAI OAuth proxy (chat + multimodal native /v1 paths)
 
 Usage:
-  xai-proxy login [--no-browser]
-  xai-proxy serve [--host 127.0.0.1] [--port 8645] [--i-understand-no-client-auth]
+  xai-proxy [--proxy URL] login [--no-browser] [--proxy URL]
+  xai-proxy [--proxy URL] serve [--host 127.0.0.1] [--port 8645] [--proxy URL] [--i-understand-no-client-auth]
   xai-proxy status
   xai-proxy logout
   xai-proxy version
@@ -62,24 +104,44 @@ Usage:
 After login once, point clients at http://127.0.0.1:8645/v1
 The proxy ignores client Authorization and attaches your OAuth bearer.
 
+Outbound proxy (OAuth + API egress):
+  --proxy URL     http(s)://host:port | socks5://host:port | socks5h://host:port
+  Env (if --proxy unset): XAI_PROXY_OUTBOUND, ALL_PROXY, HTTPS_PROXY, HTTP_PROXY
+  Bypass: NO_PROXY / no_proxy
+  Priority: --proxy > XAI_PROXY_OUTBOUND > ALL_PROXY > HTTPS_PROXY > HTTP_PROXY > direct
+
 All routes are xAI-native. Chat/text paths also work with OpenAI SDKs (full compat only).
 Native paths: /chat/completions /responses /models /embeddings /completions
              /images/* /tts /stt /videos/*   (no /audio/* shims — use /tts and /stt)
 `)
 }
 
-func cmdLogin(args []string) int {
+func cmdLogin(args []string, globalProxy string) int {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	noBrowser := fs.Bool("no-browser", false, "do not open a browser")
+	proxyFlag := fs.String("proxy", "", "outbound HTTP or SOCKS5 proxy URL")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	explicit := strings.TrimSpace(*proxyFlag)
+	if explicit == "" {
+		explicit = globalProxy
+	}
+	if err := applyProxy(explicit); err != nil {
+		fmt.Fprintf(os.Stderr, "proxy: %v\n", err)
+		return 2
+	}
+	fmt.Fprintf(os.Stderr, "Outbound: %s\n", outbound.Describe(explicit))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client, err := outbound.NewClient(outbound.Options{Timeout: 30 * time.Second})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "proxy client: %v\n", err)
+		return 1
+	}
 	result, err := auth.DeviceLogin(ctx, client, !*noBrowser, func(s string) {
 		fmt.Fprintln(os.Stderr, s)
 	})
@@ -99,13 +161,22 @@ func cmdLogin(args []string) int {
 	return 0
 }
 
-func cmdServe(args []string) int {
+func cmdServe(args []string, globalProxy string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	host := fs.String("host", "127.0.0.1", "listen host")
 	port := fs.Int("port", 8645, "listen port")
+	proxyFlag := fs.String("proxy", "", "outbound HTTP or SOCKS5 proxy URL")
 	allowRemote := fs.Bool("i-understand-no-client-auth", false, "required if host is not loopback")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	explicit := strings.TrimSpace(*proxyFlag)
+	if explicit == "" {
+		explicit = globalProxy
+	}
+	if err := applyProxy(explicit); err != nil {
+		fmt.Fprintf(os.Stderr, "proxy: %v\n", err)
 		return 2
 	}
 
@@ -117,18 +188,38 @@ func cmdServe(args []string) int {
 		return 2
 	}
 
-	mgr := credential.NewManager(nil)
+	// Shared client for refresh + upstream forward (streaming: Timeout 0).
+	upClient, err := outbound.NewClient(outbound.Options{Timeout: 0})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "proxy client: %v\n", err)
+		return 1
+	}
+	if tr, ok := upClient.Transport.(*http.Transport); ok {
+		tr.ResponseHeaderTimeout = 300 * time.Second
+	}
+	// Refresh path uses a client with timeout.
+	refreshClient, err := outbound.NewClient(outbound.Options{
+		Timeout: time.Duration(auth.DefaultRefreshTimeoutSeconds) * time.Second,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "proxy client: %v\n", err)
+		return 1
+	}
+
+	mgr := credential.NewManager(refreshClient)
 	if !mgr.IsAuthenticated() {
 		fmt.Fprintln(os.Stderr, "Not logged in. Run `xai-proxy login` first.")
 		return 2
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	srv := proxy.NewServer(mgr, proxy.Options{Host: *host, Port: *port, Logger: logger})
+	// NewServer uses nil Upstream → outbound via Config; inject our client.
+	srv := proxy.NewServerWithUpstream(mgr, upClient, proxy.Options{Host: *host, Port: *port, Logger: logger})
 
 	fmt.Fprintf(os.Stderr, "Starting xai-proxy\n")
 	fmt.Fprintf(os.Stderr, "  Listening on:  http://%s/v1\n", srv.Addr())
 	fmt.Fprintf(os.Stderr, "  Forwarding to: https://api.x.ai/v1 (chat + images + tts + stt + videos)\n")
+	fmt.Fprintf(os.Stderr, "  Outbound:     %s\n", outbound.Describe(explicit))
 	fmt.Fprintf(os.Stderr, "  Client auth:   none (OAuth attached by proxy)\n")
 	fmt.Fprintf(os.Stderr, "  Body limit:    %d bytes\n\n", proxy.MaxBodyBytes)
 	fmt.Fprintf(os.Stderr, "Client config:\n")

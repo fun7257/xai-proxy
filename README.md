@@ -159,11 +159,36 @@ curl -s http://127.0.0.1:8645/v1/videos/generations \
 
 Never commit tokens or Docker volume contents.
 
+## Outbound proxy (HTTP / SOCKS)
+
+All **egress** to xAI (OAuth discovery, device login, token refresh, API forward)
+shares one proxy policy. This is **not** an inbound client proxy.
+
+| Source | Examples |
+|--------|----------|
+| CLI (highest) | `--proxy socks5://127.0.0.1:1080` or `--proxy http://127.0.0.1:7890` |
+| Env | `XAI_PROXY_OUTBOUND`, then `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY` |
+| Bypass | `NO_PROXY` / `no_proxy` |
+| Direct | unset all of the above |
+
+Schemes: `http://`, `https://`, `socks5://`, `socks5h://` (`socks://` → socks5).
+
+```bash
+# SOCKS5 (common local clients)
+export ALL_PROXY=socks5://127.0.0.1:1080
+./xai-proxy login --no-browser
+./xai-proxy serve
+
+# Or explicit flag (wins over env)
+./xai-proxy --proxy http://127.0.0.1:7890 serve
+./xai-proxy serve --proxy socks5h://127.0.0.1:1080
+```
+
 ## Commands
 
 ```text
-xai-proxy login [--no-browser]
-xai-proxy serve [--host 127.0.0.1] [--port 8645]
+xai-proxy [--proxy URL] login [--no-browser] [--proxy URL]
+xai-proxy [--proxy URL] serve [--host 127.0.0.1] [--port 8645] [--proxy URL]
 xai-proxy status
 xai-proxy logout
 xai-proxy version

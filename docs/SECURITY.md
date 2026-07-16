@@ -63,6 +63,12 @@ Client headers other than hop-by-hop fields and `Authorization` are forwarded
 to `api.x.ai`. Prefer simple API clients over a full browser pointed at the
 proxy, to avoid sending unnecessary cookies.
 
+## Outbound proxy
+
+Operators may route **all egress** (OAuth + API) through HTTP or SOCKS5 via
+`--proxy` or standard env vars. The proxy URL may include credentials; they are
+not logged. This does not add inbound client authentication.
+
 ## Reporting issues
 
 See the repository root [SECURITY.md](../SECURITY.md).

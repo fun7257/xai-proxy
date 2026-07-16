@@ -18,7 +18,7 @@ type Discovery struct {
 // Discover fetches and validates the OIDC configuration.
 func Discover(ctx context.Context, client *http.Client) (*Discovery, error) {
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
+		client = outboundClient(15 * time.Second)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, DiscoveryURL, nil)
 	if err != nil {

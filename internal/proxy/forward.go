@@ -13,6 +13,7 @@ import (
 
 	"xai-proxy/internal/auth"
 	"xai-proxy/internal/credential"
+	"xai-proxy/internal/outbound"
 )
 
 // Config for the reverse proxy.
@@ -38,22 +39,17 @@ func (c *Config) upstreamClient() *http.Client {
 	if c.Upstream != nil {
 		return c.Upstream
 	}
-	return &http.Client{
-		Timeout: 0,
-		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				Timeout:   15 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			ForceAttemptHTTP2:     true,
-			MaxIdleConns:          100,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-			ResponseHeaderTimeout: 300 * time.Second,
-		},
+	// Streaming API: no client-level total Timeout; proxy policy via outbound.
+	client, err := outbound.NewClient(outbound.Options{Timeout: 0})
+	if err != nil {
+		return &http.Client{Timeout: 0}
 	}
+	if tr, ok := client.Transport.(*http.Transport); ok {
+		// Long reads for chat streams / media.
+		tr.ResponseHeaderTimeout = 300 * time.Second
+		tr.TLSHandshakeTimeout = 15 * time.Second
+	}
+	return client
 }
 
 func (c *Config) bodyLimit() int64 {

@@ -31,7 +31,14 @@ type Options struct {
 }
 
 // NewServer builds a proxy server. manager must be non-nil.
+// Upstream HTTP client is built via outbound proxy policy when not injected.
 func NewServer(mgr *credential.Manager, opt Options) *Server {
+	return NewServerWithUpstream(mgr, nil, opt)
+}
+
+// NewServerWithUpstream is like NewServer but uses the given upstream client
+// for API forwarding (and share proxy policy with OAuth refresh if desired).
+func NewServerWithUpstream(mgr *credential.Manager, upstream *http.Client, opt Options) *Server {
 	if opt.Host == "" {
 		opt.Host = "127.0.0.1"
 	}
@@ -39,8 +46,9 @@ func NewServer(mgr *credential.Manager, opt Options) *Server {
 		opt.Port = 8645
 	}
 	cfg := Config{
-		Manager: mgr,
-		Logger:  opt.Logger,
+		Manager:  mgr,
+		Logger:   opt.Logger,
+		Upstream: upstream,
 	}
 	s := &Server{cfg: cfg, host: opt.Host, port: opt.Port}
 	mux := http.NewServeMux()

@@ -28,7 +28,7 @@ func Refresh(ctx context.Context, client *http.Client, tokenEndpoint, refreshTok
 		return nil, NewError(CodeDiscoveryInvalid, err.Error(), true)
 	}
 	if client == nil {
-		client = &http.Client{Timeout: time.Duration(DefaultRefreshTimeoutSeconds) * time.Second}
+		client = outboundClient(time.Duration(DefaultRefreshTimeoutSeconds) * time.Second)
 	}
 
 	form := url.Values{}

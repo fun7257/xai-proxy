@@ -169,6 +169,20 @@ container run --rm xai-proxy:local \
 | `XAI_PROXY_HOME` | `/data` | Token 与状态目录 |
 | `XAI_BASE_URL` | `https://api.x.ai/v1` | 上游（必须仍是 `*.x.ai`） |
 | `TZ` | `UTC` | 时区 |
+| `XAI_PROXY_OUTBOUND` / `ALL_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY` | 空 | 出站 HTTP 或 SOCKS5（OAuth+API 共用） |
+| `NO_PROXY` | 空 | 不走代理的主机 |
+
+容器内示例：
+
+```bash
+container run -d --name xai-proxy --publish 8645:8645 \
+  --volume "$HOME/.xai-proxy-container:/data" \
+  --env XAI_PROXY_HOME=/data \
+  --env ALL_PROXY=socks5://host.docker.internal:1080 \
+  xai-proxy:local
+# 或: ... xai-proxy:local serve --host 0.0.0.0 --port 8645 \
+#        --i-understand-no-client-auth --proxy socks5://192.168.64.1:1080
+```
 
 Token 文件：`$XAI_PROXY_HOME/tokens.json`（应用内 `0600`）。
 
