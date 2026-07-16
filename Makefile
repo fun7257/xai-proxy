@@ -2,9 +2,8 @@ GO_VERSION := 1.26.5
 BINARY := xai-proxy
 PKG := ./cmd/xai-proxy
 VERSION ?= 0.1.0
-IMAGE ?= xai-proxy:local
 
-.PHONY: check-go build test vet clean container-build container-run container-stop container-login
+.PHONY: check-go build test vet clean
 
 check-go:
 	@v=$$(go env GOVERSION | sed 's/^go//'); \
@@ -25,36 +24,3 @@ vet: check-go
 
 clean:
 	rm -f $(BINARY)
-
-# --- Apple Container / OCI ---
-# Requires: container system start; container builder start (first build)
-container-build:
-	container build -t $(IMAGE) -f Dockerfile \
-		--build-arg GO_VERSION=$(GO_VERSION) \
-		--build-arg VERSION=$(VERSION) \
-		.
-
-DATA_DIR ?= $(HOME)/.xai-proxy-container
-
-container-login:
-	mkdir -p "$(DATA_DIR)" && chmod 700 "$(DATA_DIR)"
-	container run --rm -it --name xai-proxy-login \
-		--volume "$(DATA_DIR):/data" \
-		--env XAI_PROXY_HOME=/data \
-		$(IMAGE) login --no-browser
-
-# First boot: follow logs for the device URL, then approve in a browser.
-container-run:
-	-container stop xai-proxy 2>/dev/null
-	-container delete xai-proxy 2>/dev/null
-	mkdir -p "$(DATA_DIR)" && chmod 700 "$(DATA_DIR)"
-	container run -d --name xai-proxy \
-		--publish 8645:8645 \
-		--volume "$(DATA_DIR):/data" \
-		--env XAI_PROXY_HOME=/data \
-		$(IMAGE)
-	@echo "If first login: container logs -f xai-proxy  # open the printed URL"
-
-container-stop:
-	-container stop xai-proxy
-	-container delete xai-proxy

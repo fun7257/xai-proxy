@@ -9,7 +9,8 @@ The proxy attaches your OAuth bearer and **pass-through** forwards to
 
 > **Not affiliated with xAI.** Unofficial, community-maintained software.  
 > **For your machine only** — not a multi-tenant or public API gateway.  
-> License: [MIT](LICENSE). Security model: [SECURITY.md](SECURITY.md).
+> License: [MIT](LICENSE). Security model: [docs/SECURITY.md](docs/SECURITY.md).  
+> Chinese: [README_zh.md](README_zh.md).
 
 ## Important: security & scope
 
@@ -33,7 +34,6 @@ Full threat model: [docs/SECURITY.md](docs/SECURITY.md).
 
 - Point **Cursor / OpenAI SDKs / curl** at a local base URL during development
 - One OAuth login, automatic token refresh, native xAI paths for all modalities
-- Optional Docker for always-on local use
 
 ## What this is not
 
@@ -43,7 +43,7 @@ Full threat model: [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Requirements
 
-- Go **1.26.5** (or Docker)
+- Go **1.26.5**
 - SuperGrok or X Premium+ (OAuth API access; some modalities may be tier-gated upstream)
 
 ## Install
@@ -54,38 +54,12 @@ make build
 # or: go build -o xai-proxy ./cmd/xai-proxy
 ```
 
-### Container (local always-on)
-
-On **macOS**, use Apple Container (`container` CLI):
-
-```bash
-container system start && container builder start
-
-container build -t xai-proxy:local -f Dockerfile \
-  --build-arg GO_VERSION=1.26.5 --build-arg VERSION=0.1.0 .
-
-mkdir -p "$HOME/.xai-proxy-container" && chmod 700 "$HOME/.xai-proxy-container"
-# Default CMD is `start`: login (--no-browser) if needed, then serve.
-# First run: watch logs for the device URL, approve in a browser.
-container run -d --name xai-proxy --publish 8645:8645 \
-  --volume "$HOME/.xai-proxy-container:/data" --env XAI_PROXY_HOME=/data \
-  xai-proxy:local
-container logs -f xai-proxy
-
-curl -s http://127.0.0.1:8645/health
-```
-
-- **Apple Container 完整指南**：[docs/CONTAINER.md](docs/CONTAINER.md)  
-- Docker Engine 可选：[docs/DOCKER.md](docs/DOCKER.md)
-
 ## Usage
 
 ```bash
 ./xai-proxy login
 ./xai-proxy serve   # http://127.0.0.1:8645
 ```
-
-Copy-paste request samples for **every allowed path** (by category): **[example/](example/)**.
 
 | Client setting | Value |
 |----------------|--------|
@@ -201,7 +175,7 @@ export ALL_PROXY=socks5://127.0.0.1:1080
 ## Commands
 
 ```text
-xai-proxy start   # login if needed (--no-browser), then serve (container default)
+xai-proxy start   # login if needed (--no-browser), then serve
 xai-proxy login [--no-browser]
 xai-proxy serve
 xai-proxy status | logout | version
@@ -211,13 +185,13 @@ xai-proxy status | logout | version
 
 | Doc | Content |
 |-----|---------|
-| [SECURITY.md](SECURITY.md) | Scope, intended use, how to report issues |
-| [docs/SECURITY.md](docs/SECURITY.md) | Threat model & controls |
-| [docs/CONTAINER.md](docs/CONTAINER.md) | **Apple Container** 部署（推荐 macOS） |
-| [docs/DOCKER.md](docs/DOCKER.md) | Docker Engine 简要命令（可选） |
-| [docs/DESIGN.md](docs/DESIGN.md) | Architecture sketch |
-| [AGENTS.md](AGENTS.md) | Contributor / agent hard constraints |
-| [example/](example/) | Full-path curl samples |
+| [docs/SECURITY.md](docs/SECURITY.md) | Scope, threat model, reporting |
+| [docs/DESIGN.md](docs/DESIGN.md) | Architecture, paths, OAuth, CLI |
+| [AGENTS.md](AGENTS.md) | Dev style & security guidelines |
+
+Chinese translations use the `*_zh.md` suffix (e.g. [README_zh.md](README_zh.md),
+[docs/DESIGN_zh.md](docs/DESIGN_zh.md), [docs/SECURITY_zh.md](docs/SECURITY_zh.md)).
+`AGENTS.md` is English-only. Docs and code comments are English by default.
 
 ## Disclaimer
 

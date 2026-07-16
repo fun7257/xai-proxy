@@ -1,107 +1,61 @@
-# xai-proxy — Development Guide
+# xai-proxy — Development & Security Guide
 
-给在本仓库 `xai-proxy/` 下工作的人类与 AI 助手的硬约束。**优先于口头习惯。**
+Hard rules for humans and AI assistants working in `xai-proxy/`. These take
+precedence over informal habits.
 
-## 项目是什么
+Product behavior, paths, OAuth, and CLI: see [docs/](docs/).
 
-- **本机开发者工具**（单操作者、非 SaaS、非 xAI 官方产品）
-- 本机 xAI OAuth（设备码）登录 + 本地 **xAI 原生 `/v1/*` 转发代理**（聊天 + 全模态）
-- 操作者 `login` 一次后，客户端免鉴权使用（默认仅 `127.0.0.1`）
-- 协议对齐 Hermes 一类 `xai-oauth` 设备码流程，但**独立实现**，不依赖 hermes-agent 运行时
-- 开源定位与免责：见根目录 `README.md`、`SECURITY.md`、`LICENSE`（MIT）
+**Documentation language:** all docs and code comments are English. Chinese
+product docs use parallel `*_zh.md` files (this guide is English-only).
 
-## 技术硬约束
+## Development style
 
-1. Go **1.26.5**（`go.mod` 必须写 `go 1.26.5`）
-2. HTTP **仅** 标准库 `net/http`（Server / Client / ServeMux）
-   - 禁止：chi、echo、gin、fiber、gorilla/mux、fasthttp 等
-3. **非必要零第三方依赖**
-   - 能用 stdlib 解决的禁止加依赖
-   - 确需引入：优先 `golang.org/x/*`，其次高星、持续维护的事实标准库
-   - 新增 `require` 须说明：为何 stdlib 不够 + 维护现状
-4. 依赖：默认零第三方；出站 SOCKS 允许 `golang.org/x/net`（官方 x 包）
+1. **Language and toolchain**
+   - Go **1.26.5** (`go.mod` must say `go 1.26.5`)
+   - Prefer `make build` / `make test` / `make vet`; changes must pass `go test ./...`
 
-## 产品核心要点
+2. **HTTP stack**
+   - Standard library `net/http` only (Server / Client / ServeMux)
+   - Do not introduce chi, echo, gin, fiber, gorilla/mux, fasthttp, etc.
 
-1. **本地客户端鉴权**：`/v1/*` 必须 `Authorization: Bearer <client_key>`；校验后剥离客户端头，再挂 OAuth Bearer 上游
-2. 安全边界 = 默认 bind `127.0.0.1` + `tokens.json` + `client_key` 权限；非回环须显式确认
-3. Token：`~/.xai-proxy/tokens.json`；客户端密钥：`client_key`（`xai-proxy key show`），与 Hermes 解耦
-4. Refresh token 单次使用：刷新后必须原子写回；文件锁 + singleflight
-5. Host 钉死：token / discovery / inference 仅 `https` + `*.x.ai`
-6. 403 refresh = 档位拒绝，不是过期；`invalid_grant` 才 quarantine / 要求 re-login
-7. **透传 body，不改协议形状**；路径按 xAI 原生 allow 策略（见下）
-8. SSE / 二进制 / multipart 流式不得错误改写；body 上限默认 **100 MiB**（媒体）
-9. 日志永不输出 `access_token` / `refresh_token`
+3. **Dependencies**
+   - Default: **zero third-party** deps; if stdlib can do it, do not add a module
+   - If a dependency is required: prefer `golang.org/x/*`, then well-maintained de-facto standard libraries
+   - Outbound SOCKS may use `golang.org/x/net`
+   - New `require` lines must explain why stdlib is insufficient and the maintenance status
 
-## 路径策略（强制）
+4. **Code organization**
+   - Respect existing `internal/*` boundaries; do not duplicate responsibilities across packages
+   - Pass-through proxy: do not rewrite request/response body shapes; no protocol translation layers
+   - Streaming (SSE / binary / multipart) must not be incorrectly fully buffered or rewritten
+   - Config and on-disk state go through `internal/store` and `XAI_PROXY_HOME`; no scattered hard-coded paths
 
-### 原则
+5. **Change hygiene**
+   - Touch only files needed for the task; no drive-by refactors or unrelated doc expansion
+   - Behavior changes need tests (`*_test.go`); security-sensitive logic (auth compare, host pin, token write-back) must have coverage
+   - User-facing errors should be readable; log details still follow the security rules below
 
-1. **全部转发的都是 xAI 原生 path**（对话 / 图片 / 语音 / 视频一视同仁）
-2. 其中**一部分**与 OpenAI 同 path + 同 body 形状 → **额外**可被 OpenAI SDK 当 base_url 用（全兼容）
-3. **做不到全兼容 → 不写 shim**；客户端直接打 xAI 原生 path，不发明 `/audio/*` 等假映射
+## Security guidelines
 
-### 当前支持的 xAI 原生 path（`/v1` 下）
+1. **Secrets and tokens**
+   - Never log or echo `access_token`, `refresh_token`, or client keys (including in samples committed to the repo)
+   - On-disk secrets: directory `0700`, files `0600`; atomic write-back to avoid truncated files
+   - Keep client keys separate from upstream OAuth credentials; after inbound auth succeeds, strip client auth headers, then attach the upstream credential
 
-| Path | 能力 | 额外 OpenAI 全兼容 |
-|------|------|-------------------|
-| `/chat/completions` | 对话 | 是 |
-| `/responses` | Responses 对话 | 是 |
-| `/completions` | Completions | 是 |
-| `/embeddings` | 向量 | 是 |
-| `/models` | 模型列表 | 是 |
-| `/images/generations` | 文生图 | 否（xAI 扩展字段） |
-| `/images/edits` | 图编辑（JSON） | 否 |
-| `/tts` | 文字转语音 | 否 |
-| `/stt` | 语音转文字 multipart | 否 |
-| `/videos/generations` | 视频生成 | 否 |
-| `/videos/edits` | 视频编辑 | 否 |
-| `/videos/extensions` | 视频延长 | 否 |
-| `/videos/{id}` | 视频任务状态 | 否 |
+2. **Authentication and comparison**
+   - Compare secrets with **constant-time** (or equivalent) comparison
+   - Business API routes must not be unauthenticated by default; probe routes, if open, must be explicit and minimal
+   - Do not add hidden “skip auth for debugging” flags or env backdoors
 
-### 明确拒绝的 OpenAI-only 音频 path（不 shim）
+3. **Network boundary**
+   - Default listen address is loopback only; non-loopback binds require an explicit, hard-to-misclick confirmation
+   - Upstream URL hosts must be pinned to expected domains over `https`; do not follow unvalidated redirects to arbitrary hosts
+   - Outbound proxy URLs may contain credentials: never log them
 
-- `/audio/speech` → 用原生 `/tts`
-- `/audio/transcriptions` → 用原生 `/stt`
-- `/audio/translations` → 不映射
+4. **Concurrency and credential rotation**
+   - Single-use refresh (and similar) credentials: serialize refresh (lock / singleflight); do not discard old state before a successful write-back
+   - Distinguish terminal failures from transient / entitlement failures to avoid wiping credentials or refresh loops
 
-新增 path：改 `internal/proxy/allowlist.go` 的 `ExactAllowedPaths` 或 `PathAllowed`。
-
-## OAuth 契约（与 Hermes 对齐）
-
-- Client ID: `b1a00492-073a-47ea-816f-4c329264a828`
-- Scope: `openid profile email offline_access grok-cli:access api:access`
-- Device: `POST https://auth.x.ai/oauth2/device/code`
-- Token: discovery 的 `token_endpoint`（通常 `https://auth.x.ai/oauth2/token`）
-- API: `https://api.x.ai/v1`
-- 参考（只读）：`hermes-agent/hermes_cli/auth.py`、`proxy/server.py`、`proxy/adapters/xai.py`
-
-## 模块边界
-
-- `internal/auth`：登录 / 刷新 / JWT skew / host pin
-- `internal/store`：tokens 原子读写 + flock
-- `internal/credential`：`GetBearer` / `ForceRefresh` / `Status`
-- `internal/proxy`：`net/http` 转发 + path 策略
-- 不把 Hermes Python 代码 vendoring 进来
-
-## CLI
-
-```text
-xai-proxy [--proxy URL] login [--no-browser] [--proxy URL]
-xai-proxy [--proxy URL] serve [--host ...] [--port ...] [--proxy URL]
-xai-proxy status
-xai-proxy logout
-xai-proxy version
-```
-
-出站代理（OAuth+API）：`--proxy` / `XAI_PROXY_OUTBOUND` / `ALL_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY`；实现见 `internal/outbound`。
-
-## 明确不做
-
-- 多租户 SaaS / 公网身份体系（仅有本地共享密钥，不是完整用户系统）
-- 冒充 xAI 官方产品
-- 依赖 Hermes Python
-- Twitter 官方 OAuth API
-- OpenAI→xAI TTS/STT/video 假兼容 shim
-- 无必要的第三方 HTTP 框架
-- WebSocket Voice realtime 网关（当前非目标）
+5. **Supply chain and surface**
+   - Do not vendor unrelated large runtimes; do not copy external project trees into this repo as dependencies
+   - Do not add debug endpoints, default-exposed pprof, or unauthenticated admin interfaces that expand attack surface

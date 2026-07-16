@@ -1,16 +1,35 @@
-# Security model (operator guide)
+# Security
 
-## Product positioning
+Operator security notes, threat model, and vulnerability reporting.  
+Development style and coding-time security rules: root [AGENTS.md](../AGENTS.md).  
+Architecture and dual-layer auth: [DESIGN.md](DESIGN.md).  
+Chinese: [SECURITY_zh.md](SECURITY_zh.md).
 
-**xai-proxy is a local developer tool** for a single human operator on a
-workstation (or a Docker container bound to host loopback).
+## What this project is
 
-It is **not** multi-tenant SaaS, **not** an xAI official product, and **not**
-safe to expose as a public API without additional authentication in front.
+**xai-proxy** is a **local developer tool**: a single-operator, machine-local
+reverse proxy that attaches your xAI OAuth credentials to outbound API calls.
+
+It is **not**:
+
+- an xAI / Grok / SuperGrok official product
+- a multi-tenant or public SaaS gateway
+- a substitute for putting authentication in front of a network-exposed service
+
+## Intended deployment
+
+| Intended | Not intended |
+|----------|----------------|
+| `127.0.0.1` / localhost on your workstation | Public internet without an outer auth layer |
+| One human operator, one OAuth login | Shared LAN / untrusted multi-user access to the proxy port |
+
+**Local client authentication is required** for `/v1/*` (`Authorization: Bearer
+<client_key>`). Anyone with the key **and** network reachability can use
+**your** subscription quota. `/health` and `/ready` remain open for probes.
 
 ## Threat model
 
-Anyone who can connect to the listen socket can:
+Anyone who can connect to the listen socket **and** present a valid client key can:
 
 - Invoke chat, image, TTS/STT, and video endpoints on **your** OAuth account
 - Spend SuperGrok / subscription quota and trigger billable or rate-limited usage
@@ -43,14 +62,8 @@ xai-proxy serve --host 0.0.0.0 --i-understand-no-client-auth
 ```
 
 Do this only behind a trusted network, VPN, or reverse proxy **with its own auth**.
-
-### Docker
-
-The container process binds `0.0.0.0:8645` (so host port publish works) **with**
-`--i-understand-no-client-auth`. Prefer publishing only to the host loopback
-when the runtime allows it. Do not expose the proxy port on a shared network
-without an outer auth layer. Token data under the host volume (e.g.
-`~/.xai-proxy-container`) is secret material.
+`--i-understand-no-client-auth` acknowledges **non-loopback bind**, not “no
+local client API key” — `/v1/*` still requires the client key.
 
 ## OAuth credentials
 
@@ -72,6 +85,22 @@ Operators may route **all egress** (OAuth + API) through HTTP or SOCKS5 via
 `--proxy` or standard env vars. The proxy URL may include credentials; they are
 not logged. This does not add inbound client authentication.
 
-## Reporting issues
+## Reporting vulnerabilities
 
-See the repository root [SECURITY.md](../SECURITY.md).
+If you believe you found a security issue **in this software** (not in xAI’s
+upstream API):
+
+1. Prefer a private report (GitHub Security Advisory / email to maintainers if published).
+2. Do **not** open a public issue that includes live tokens, refresh tokens, or
+   full request captures containing secrets.
+3. Include: affected version/commit, reproduction steps, impact assessment.
+
+We aim to acknowledge valid reports in a reasonable time. There is no formal
+bug bounty.
+
+## Out of scope (please don’t report as product bugs)
+
+- Calling `/v1` without a client key and receiving 401 — expected
+- Abuse after the operator binds `0.0.0.0` or publishes the port beyond loopback
+- Upstream xAI 403 / tier / rate limits
+- Using a third-party OAuth public client subject to xAI policy changes

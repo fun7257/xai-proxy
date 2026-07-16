@@ -56,8 +56,8 @@ WORKDIR /data
 ENV XAI_PROXY_HOME=/data \
     TZ=UTC
 
-# Container must bind 0.0.0.0 so port publish works. Prefer host-side bind to
-# loopback when the runtime supports it — no client auth.
+# Bind 0.0.0.0 so host port publish works. Prefer publishing only to host loopback.
+# /v1/* still requires the local client API key (see client_key under XAI_PROXY_HOME).
 EXPOSE 8645
 
 # start may wait for device-code OAuth before listening; allow a long start window.
@@ -66,4 +66,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=3 \
 
 ENTRYPOINT ["/usr/local/bin/xai-proxy"]
 # First boot: device login (--no-browser) if no tokens, then serve automatically.
+# --i-understand-no-client-auth = allow non-loopback bind (not "disable client key").
 CMD ["start", "--host", "0.0.0.0", "--port", "8645", "--no-browser", "--i-understand-no-client-auth"]
