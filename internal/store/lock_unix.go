@@ -6,7 +6,12 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+	"time"
 )
+
+// lockWaitTimeout bounds how long we block on flock (another hung process).
+// Overridable in tests.
+var lockWaitTimeout = 45 * time.Second
 
 // FileLock is an exclusive flock on tokens.json.lock.
 type FileLock struct {
@@ -14,6 +19,7 @@ type FileLock struct {
 }
 
 // AcquireLock opens/creates the lock file and takes an exclusive flock.
+// Uses non-blocking flock with retry so a stuck holder cannot freeze the proxy forever.
 func AcquireLock() (*FileLock, error) {
 	if _, err := EnsureHome(); err != nil {
 		return nil, err
@@ -26,11 +32,23 @@ func AcquireLock() (*FileLock, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("flock: %w", err)
+	deadline := time.Now().Add(lockWaitTimeout)
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return &FileLock{f: f}, nil
+		}
+		// EWOULDBLOCK / EAGAIN: held by another process or goroutine path.
+		if err != syscall.EWOULDBLOCK && err != syscall.EAGAIN {
+			f.Close()
+			return nil, fmt.Errorf("flock: %w", err)
+		}
+		if time.Now().After(deadline) {
+			f.Close()
+			return nil, fmt.Errorf("token lock timeout after %s (another process may be stuck holding %s)", lockWaitTimeout, path)
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
-	return &FileLock{f: f}, nil
 }
 
 // Unlock releases the flock.

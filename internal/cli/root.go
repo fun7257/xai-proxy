@@ -218,13 +218,11 @@ func runServe(host string, port int, allowRemote bool, explicitProxy string) int
 		return 2
 	}
 
+	// Timeout 0: allow long SSE/media bodies; header wait bounded in outbound transport.
 	upClient, err := outbound.NewClient(outbound.Options{Timeout: 0})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "proxy client: %v\n", err)
 		return 1
-	}
-	if tr, ok := upClient.Transport.(*http.Transport); ok {
-		tr.ResponseHeaderTimeout = 300 * time.Second
 	}
 	refreshClient, err := outbound.NewClient(outbound.Options{
 		Timeout: time.Duration(auth.DefaultRefreshTimeoutSeconds) * time.Second,

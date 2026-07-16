@@ -274,11 +274,19 @@ func (g *singleflight) Do(key string, fn func() (any, error)) (any, error, bool)
 	g.m[key] = c
 	g.mu.Unlock()
 
-	c.val, c.err = fn()
-	c.wg.Done()
-
-	g.mu.Lock()
-	delete(g.m, key)
-	g.mu.Unlock()
+	// Always finish the flight: a panic inside fn() must not leave waiters blocked forever
+	// (that would freeze every subsequent GetBearer until process restart).
+	func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				c.err = fmt.Errorf("credential refresh panic: %v", rec)
+			}
+			c.wg.Done()
+			g.mu.Lock()
+			delete(g.m, key)
+			g.mu.Unlock()
+		}()
+		c.val, c.err = fn()
+	}()
 	return c.val, c.err, false
 }

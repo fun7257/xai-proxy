@@ -11,6 +11,7 @@ package outbound
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -112,12 +113,18 @@ func NewTransport(opts Options) (*http.Transport, error) {
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   15 * time.Second,
+		// Prefer HTTP/1.1 for long-lived streaming proxies: a single stuck HTTP/2
+		// stream/connection can stall multiplexed traffic until process restart.
+		ForceAttemptHTTP2: false,
+		TLSNextProto:      map[string]func(authority string, c *tls.Conn) http.RoundTripper{},
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 32,
+		MaxConnsPerHost:     64,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 15 * time.Second,
+		// Bound waits for response headers (body stream may still run long).
+		ResponseHeaderTimeout: 120 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-		// ResponseHeaderTimeout left 0 for streaming API responses when client Timeout is 0.
 	}
 
 	switch kind {

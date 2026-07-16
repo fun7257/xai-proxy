@@ -42,15 +42,11 @@ func (c *Config) upstreamClient() *http.Client {
 	if c.Upstream != nil {
 		return c.Upstream
 	}
-	// Streaming API: no client-level total Timeout; proxy policy via outbound.
+	// Streaming API: no client-level total Timeout (body may stream for a long time).
+	// ResponseHeaderTimeout is set on the transport in outbound.NewTransport.
 	client, err := outbound.NewClient(outbound.Options{Timeout: 0})
 	if err != nil {
 		return &http.Client{Timeout: 0}
-	}
-	if tr, ok := client.Transport.(*http.Transport); ok {
-		// Long reads for chat streams / media.
-		tr.ResponseHeaderTimeout = 300 * time.Second
-		tr.TLSHandshakeTimeout = 15 * time.Second
 	}
 	return client
 }
@@ -180,28 +176,68 @@ func (c *Config) doUpstream(ctx context.Context, w http.ResponseWriter, r *http.
 	copyResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	streamed = true
-	defer resp.Body.Close()
+
+	var flush http.Flusher
+	if f, ok := w.(http.Flusher); ok {
+		flush = f
+	}
+	// Pass-through body: no full-buffer requirement; cancel closes upstream on client gone.
+	if err := streamCopy(ctx, w, resp.Body, flush); err != nil {
+		return resp.StatusCode, true, err
+	}
+	return resp.StatusCode, true, nil
+}
+
+// streamCopy copies src→dst in chunks without rewriting bytes.
+// On ctx cancel it closes src so a blocked Read unblocks (avoids stuck goroutines).
+// When flush is non-nil, each successful write is flushed for SSE/chunked clients.
+func streamCopy(ctx context.Context, dst io.Writer, src io.ReadCloser, flush http.Flusher) error {
+	if src == nil {
+		return nil
+	}
+	defer src.Close()
+
+	stop := context.AfterFunc(ctx, func() {
+		_ = src.Close()
+	})
+	defer stop()
 
 	buf := make([]byte, 32*1024)
-	flusher, canFlush := w.(http.Flusher)
 	for {
-		n, readErr := resp.Body.Read(buf)
+		n, readErr := src.Read(buf)
 		if n > 0 {
-			if _, werr := w.Write(buf[:n]); werr != nil {
-				return resp.StatusCode, true, werr
+			if err := writeAll(dst, buf[:n]); err != nil {
+				_ = src.Close()
+				return err
 			}
-			if canFlush {
-				flusher.Flush()
+			if flush != nil {
+				flush.Flush()
 			}
 		}
 		if readErr == io.EOF {
-			break
+			return nil
 		}
 		if readErr != nil {
-			return resp.StatusCode, true, readErr
+			return readErr
 		}
 	}
-	return resp.StatusCode, true, nil
+}
+
+// writeAll writes p fully (handles short writes) without modifying content.
+func writeAll(w io.Writer, p []byte) error {
+	for len(p) > 0 {
+		n, err := w.Write(p)
+		if n > 0 {
+			p = p[n:]
+		}
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	return nil
 }
 
 func (c *Config) writeAuthError(w http.ResponseWriter, err error) {
