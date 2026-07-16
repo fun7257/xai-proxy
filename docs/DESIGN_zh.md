@@ -7,7 +7,6 @@
 
 - **本机开发者工具**（单操作者、非 SaaS、非 xAI 官方产品）
 - 本机 xAI OAuth（设备码）登录 + 本地 **xAI 原生 `/v1/*` 转发代理**（聊天 + 全模态）
-- 协议对齐 Hermes 一类 `xai-oauth` 设备码流程，但**独立实现**，不依赖 hermes-agent 运行时
 - 开源定位与免责：根目录 `README.md` / `README_zh.md`、`LICENSE`（MIT）；安全见 [SECURITY_zh.md](SECURITY_zh.md)
 
 ## 鉴权双层模型
@@ -29,8 +28,6 @@
 4. **Proxy**（`internal/proxy`）— `net/http` 透传转发 + path allowlist + client auth  
 5. **Outbound**（`internal/outbound`）— HTTP/SOCKS 出站代理策略  
 6. **CLI**（`internal/cli`）— `start` / `login` / `serve` / `key` / …
-
-不把 Hermes Python 代码 vendoring 进来。
 
 ## 路径策略
 
@@ -70,7 +67,7 @@
 
 实现入口：`internal/proxy/allowlist.go`。
 
-## OAuth 契约（与 Hermes 对齐）
+## OAuth 契约
 
 | 项 | 值 |
 |----|-----|
@@ -79,8 +76,6 @@
 | Device | `POST https://auth.x.ai/oauth2/device/code` |
 | Token | discovery 的 `token_endpoint`（通常 `https://auth.x.ai/oauth2/token`） |
 | API | `https://api.x.ai/v1` |
-
-只读参考（不依赖运行时）：`hermes-agent/hermes_cli/auth.py`、`proxy/server.py`、`proxy/adapters/xai.py`。
 
 Refresh：单次使用、原子写回；**403** = 档位拒绝；`invalid_grant` 等 terminal → quarantine / re-login。
 
@@ -123,7 +118,6 @@ xai-proxy status | logout | version
 
 - 多租户 SaaS / 公网身份体系（仅有本地共享 client key，不是完整用户系统）
 - 冒充 xAI 官方产品
-- 依赖 Hermes Python
 - Twitter 官方 OAuth API
 - OpenAI→xAI TTS/STT/video 假兼容 shim
 - WebSocket Voice realtime 网关（当前非目标）

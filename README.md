@@ -24,9 +24,8 @@ The proxy attaches your OAuth bearer and **pass-through** forwards to
 **Local client auth is required** on `/v1/*`: `Authorization: Bearer <client_key>`.  
 `/health` and `/ready` stay open for probes. Upstream OAuth is separate (attached by the proxy).
 
-OAuth uses a **public** device-code client id (same class of flow as common
-Grok/Hermes-style CLI tools). xAI may change allowlists or terms at any time;
-use at your own risk.
+OAuth uses a **public** device-code client id. xAI may change allowlists or
+terms at any time; use at your own risk.
 
 Full threat model: [docs/SECURITY.md](docs/SECURITY.md).
 

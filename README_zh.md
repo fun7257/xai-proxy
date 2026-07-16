@@ -21,7 +21,7 @@
 **`/v1/*` 强制本地客户端鉴权**：`Authorization: Bearer <client_key>`。  
 `/health`、`/ready` 对探针开放。上游 OAuth 由代理单独挂载。
 
-OAuth 使用**公开**设备码 client id（与常见 Grok/Hermes 风格 CLI 同类流程）。xAI 可能随时调整白名单或条款；风险自负。
+OAuth 使用**公开**设备码 client id。xAI 可能随时调整白名单或条款；风险自负。
 
 完整威胁模型：[docs/SECURITY_zh.md](docs/SECURITY_zh.md)。
 

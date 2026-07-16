@@ -8,7 +8,6 @@ Chinese: [DESIGN_zh.md](DESIGN_zh.md).
 
 - A **local developer tool** (single operator; not SaaS; not an official xAI product)
 - Local xAI OAuth (device code) login + a local **xAI-native `/v1/*` reverse proxy** (chat + multimodal)
-- Protocol aligned with Hermes-style `xai-oauth` device flow, but **implemented independently** (no hermes-agent runtime dependency)
 - Open-source positioning: root `README.md`, `LICENSE` (MIT); security: [SECURITY.md](SECURITY.md)
 
 ## Dual-layer authentication
@@ -30,8 +29,6 @@ Chinese: [DESIGN_zh.md](DESIGN_zh.md).
 4. **Proxy** (`internal/proxy`) — `net/http` pass-through + path allowlist + client auth  
 5. **Outbound** (`internal/outbound`) — HTTP/SOCKS egress proxy policy  
 6. **CLI** (`internal/cli`) — `start` / `login` / `serve` / `key` / …
-
-Do not vendor Hermes Python code into this repository.
 
 ## Path policy
 
@@ -71,7 +68,7 @@ Do not vendor Hermes Python code into this repository.
 
 Implementation: `internal/proxy/allowlist.go`.
 
-## OAuth contract (aligned with Hermes)
+## OAuth contract
 
 | Item | Value |
 |------|-------|
@@ -80,8 +77,6 @@ Implementation: `internal/proxy/allowlist.go`.
 | Device | `POST https://auth.x.ai/oauth2/device/code` |
 | Token | discovery `token_endpoint` (typically `https://auth.x.ai/oauth2/token`) |
 | API | `https://api.x.ai/v1` |
-
-Read-only reference (no runtime dependency): `hermes-agent/hermes_cli/auth.py`, `proxy/server.py`, `proxy/adapters/xai.py`.
 
 Refresh: single-use, atomic write-back; **403** = tier/entitlement denial; terminal errors such as `invalid_grant` → quarantine / re-login.
 
@@ -124,7 +119,6 @@ Implementation: `internal/outbound`.
 
 - Multi-tenant SaaS / public identity systems (local shared client key only, not a full user system)
 - Impersonating an official xAI product
-- Depending on Hermes Python
 - Twitter official OAuth API
 - Fake OpenAI→xAI TTS/STT/video compatibility shims
 - WebSocket Voice realtime gateway (not a current goal)

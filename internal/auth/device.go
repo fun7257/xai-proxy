@@ -214,9 +214,6 @@ func DeviceLogin(ctx context.Context, client *http.Client, openBrowser bool, pri
 	}
 
 	base := ValidateInferenceBaseURL(os.Getenv("XAI_BASE_URL"), DefaultAPIBase)
-	if v := os.Getenv("HERMES_XAI_BASE_URL"); v != "" {
-		base = ValidateInferenceBaseURL(v, DefaultAPIBase)
-	}
 	return &LoginResult{
 		Tokens:    *tr,
 		Discovery: *disc,

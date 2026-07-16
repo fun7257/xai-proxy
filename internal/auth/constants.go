@@ -1,6 +1,6 @@
 package auth
 
-// OAuth constants aligned with Hermes hermes_cli/auth.py (xAI Grok OAuth).
+// OAuth constants for xAI Grok device-code login and API access.
 const (
 	Issuer          = "https://auth.x.ai"
 	DiscoveryURL    = Issuer + "/.well-known/openid-configuration"

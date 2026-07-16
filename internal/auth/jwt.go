@@ -57,7 +57,7 @@ func AccessTokenIsExpiring(accessToken string, skewSeconds int) bool {
 	return float64(exp) <= float64(time.Now().Unix())+float64(skewSeconds)
 }
 
-// ProactiveRefreshSkewSeconds mirrors Hermes adaptive skew:
+// ProactiveRefreshSkewSeconds returns adaptive skew for proactive refresh:
 // long-lived tokens use up to 1h; short remaining life caps at 120s.
 func ProactiveRefreshSkewSeconds(accessToken string) int {
 	maxSkew := MaxRefreshSkewSeconds
