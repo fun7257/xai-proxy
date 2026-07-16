@@ -82,8 +82,10 @@ proxy, to avoid sending unnecessary cookies.
 ## Outbound proxy
 
 Operators may route **all egress** (OAuth + API) through HTTP or SOCKS5 via
-`--proxy` or standard env vars. The proxy URL may include credentials; they are
-not logged. This does not add inbound client authentication.
+`--proxy` or env vars: `XAI_PROXY_OUTBOUND`, then `ALL_PROXY` / `HTTPS_PROXY` /
+`HTTP_PROXY` (and lowercase forms), with `NO_PROXY` / `no_proxy` bypass. The
+proxy URL may include credentials; they are not logged. This does not add
+inbound client authentication. See the README **Environment variables** section.
 
 ## Reporting vulnerabilities
 

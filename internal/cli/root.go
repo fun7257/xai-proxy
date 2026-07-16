@@ -120,9 +120,10 @@ First run: generate → login → serve.
 
 Outbound proxy (OAuth + API egress):
   --proxy URL     http(s)://host:port | socks5://host:port | socks5h://host:port
-  Env: XAI_PROXY_OUTBOUND, ALL_PROXY, HTTPS_PROXY, HTTP_PROXY
-  Bypass: NO_PROXY / no_proxy
+  Env: XAI_PROXY_HOME, XAI_PROXY_OUTBOUND, XAI_BASE_URL
+       ALL_PROXY, HTTPS_PROXY, HTTP_PROXY (+ lowercase), NO_PROXY / no_proxy
   Priority: --proxy > XAI_PROXY_OUTBOUND > ALL_PROXY > HTTPS_PROXY > HTTP_PROXY > direct
+  See README "Environment variables" for details.
 `)
 }
 

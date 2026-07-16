@@ -141,33 +141,52 @@ curl -s http://127.0.0.1:7257/v1/videos/generations \
 |------|---------|
 | `~/.xai-proxy/tokens.json` | OAuth tokens (`0600`) — **secret** |
 | `~/.xai-proxy/client_key` | Salted **SHA-256** hash of the client key only (`0600`); each `generate` overwrites |
-| `XAI_PROXY_HOME` | Override config directory |
 
+Default directory is `~/.xai-proxy` (override with `XAI_PROXY_HOME`).  
 The plaintext client key is shown **only** by `generate`. The on-disk file is a
 verifier (`v1$sha256$…`) and cannot recover the secret.
 Never commit tokens, client keys, or volume contents.
 
-## Outbound proxy (HTTP / SOCKS)
+## Environment variables
 
-All **egress** to xAI (OAuth discovery, device login, token refresh, API forward)
-shares one proxy policy. This is **not** an inbound client proxy.
+### Project
 
-| Source | Examples |
-|--------|----------|
-| CLI (highest) | `--proxy socks5://127.0.0.1:1080` or `--proxy http://127.0.0.1:7890` |
-| Env | `XAI_PROXY_OUTBOUND`, then `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY` |
-| Bypass | `NO_PROXY` / `no_proxy` |
-| Direct | unset all of the above |
+| Variable | Purpose |
+|----------|---------|
+| `XAI_PROXY_HOME` | Config directory for `tokens.json` and `client_key` (default `~/.xai-proxy`) |
+| `XAI_PROXY_OUTBOUND` | Outbound HTTP/SOCKS proxy for OAuth + API (preferred over standard proxy env vars) |
+| `XAI_BASE_URL` | Optional inference base written at login (default `https://api.x.ai/v1`; must be HTTPS on `*.x.ai`) |
+
+There is **no** env override for the local client API key (use `xai-proxy generate` only).
+
+### Outbound proxy (standard)
+
+Applies to **egress** only (OAuth discovery, device login, refresh, API forward) — not inbound clients.
+
+| Variable | Role |
+|----------|------|
+| `XAI_PROXY_OUTBOUND` | Project-specific proxy URL (highest among env vars) |
+| `ALL_PROXY` / `all_proxy` | Unified proxy (often SOCKS5) |
+| `HTTPS_PROXY` / `https_proxy` | HTTPS proxy |
+| `HTTP_PROXY` / `http_proxy` | HTTP proxy |
+| `NO_PROXY` / `no_proxy` | Hosts that bypass the proxy |
+
+**Priority** (high → low): CLI `--proxy` → `XAI_PROXY_OUTBOUND` → `ALL_PROXY` → `HTTPS_PROXY` → `HTTP_PROXY` → direct.
 
 Schemes: `http://`, `https://`, `socks5://`, `socks5h://` (`socks://` → socks5).
 
 ```bash
-# SOCKS5 (common local clients)
+# Config dir (optional)
+export XAI_PROXY_HOME="$HOME/.xai-proxy"
+
+# SOCKS5 egress (common local clients)
 export ALL_PROXY=socks5://127.0.0.1:1080
+# or: export XAI_PROXY_OUTBOUND=socks5://127.0.0.1:1080
+
 ./xai-proxy login --no-browser
 ./xai-proxy serve
 
-# Or explicit flag (wins over env)
+# Explicit flag wins over env
 ./xai-proxy --proxy http://127.0.0.1:7890 serve
 ./xai-proxy serve --proxy socks5h://127.0.0.1:1080
 ```

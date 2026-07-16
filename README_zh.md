@@ -135,31 +135,51 @@ curl -s http://127.0.0.1:7257/v1/videos/generations \
 |------|------|
 | `~/.xai-proxy/tokens.json` | OAuth tokens（`0600`）— **密钥** |
 | `~/.xai-proxy/client_key` | 仅保存 client key 的加盐 **SHA-256** 哈希（`0600`）；每次 `generate` 覆盖 |
-| `XAI_PROXY_HOME` | 覆盖配置目录 |
 
+默认目录为 `~/.xai-proxy`（可用 `XAI_PROXY_HOME` 覆盖）。  
 明文 client key **仅**在 `generate` 时展示一次；磁盘为校验串（`v1$sha256$…`），无法还原明文。
 切勿提交 token、client key 或 volume 内容。
 
-## 出站代理（HTTP / SOCKS）
+## 环境变量
 
-所有到 xAI 的**出站**（OAuth discovery、设备登录、token refresh、API 转发）共用一套代理策略。这**不是**入站客户端代理。
+### 项目自有
 
-| 来源 | 示例 |
+| 变量 | 作用 |
 |------|------|
-| CLI（最高优先） | `--proxy socks5://127.0.0.1:1080` 或 `--proxy http://127.0.0.1:7890` |
-| Env | `XAI_PROXY_OUTBOUND`，然后 `ALL_PROXY`、`HTTPS_PROXY`、`HTTP_PROXY` |
-| 绕过 | `NO_PROXY` / `no_proxy` |
-| 直连 | 以上均未设置 |
+| `XAI_PROXY_HOME` | 配置目录（存放 `tokens.json`、`client_key`；默认 `~/.xai-proxy`） |
+| `XAI_PROXY_OUTBOUND` | OAuth + API 的出站 HTTP/SOCKS 代理（优先于标准代理环境变量） |
+| `XAI_BASE_URL` | 登录时可选的上游 API base（默认 `https://api.x.ai/v1`；须为 `*.x.ai` 的 HTTPS） |
+
+**没有**通过环境变量注入本地 client API key 的方式（只能 `xai-proxy generate`）。
+
+### 出站代理（标准）
+
+仅影响**出站**（OAuth discovery、设备登录、refresh、API 转发），不是入站客户端代理。
+
+| 变量 | 作用 |
+|------|------|
+| `XAI_PROXY_OUTBOUND` | 本项目专用代理 URL（环境变量中优先级最高） |
+| `ALL_PROXY` / `all_proxy` | 统一代理（常见 SOCKS5） |
+| `HTTPS_PROXY` / `https_proxy` | HTTPS 代理 |
+| `HTTP_PROXY` / `http_proxy` | HTTP 代理 |
+| `NO_PROXY` / `no_proxy` | 不走代理的 host 列表 |
+
+**优先级**（高 → 低）：CLI `--proxy` → `XAI_PROXY_OUTBOUND` → `ALL_PROXY` → `HTTPS_PROXY` → `HTTP_PROXY` → 直连。
 
 协议：`http://`、`https://`、`socks5://`、`socks5h://`（`socks://` → socks5）。
 
 ```bash
-# SOCKS5（常见本机客户端）
+# 配置目录（可选）
+export XAI_PROXY_HOME="$HOME/.xai-proxy"
+
+# SOCKS5 出站（常见本机客户端）
 export ALL_PROXY=socks5://127.0.0.1:1080
+# 或: export XAI_PROXY_OUTBOUND=socks5://127.0.0.1:1080
+
 ./xai-proxy login --no-browser
 ./xai-proxy serve
 
-# 或显式 flag（覆盖 env）
+# 显式 flag 覆盖 env
 ./xai-proxy --proxy http://127.0.0.1:7890 serve
 ./xai-proxy serve --proxy socks5h://127.0.0.1:1080
 ```

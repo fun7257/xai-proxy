@@ -94,18 +94,34 @@ xai-proxy status | logout | version
 | 来源 | 说明 |
 |------|------|
 | CLI | `--proxy socks5://…` / `http://…`（优先） |
-| Env | `XAI_PROXY_OUTBOUND`，然后 `ALL_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY` |
+| Env | 见下方 **环境变量** |
 | Bypass | `NO_PROXY` / `no_proxy` |
 
 实现：`internal/outbound`。
 
 ### 配置目录
 
-| 路径 / 变量 | 用途 |
-|-------------|------|
+| 路径 | 用途 |
+|------|------|
 | `~/.xai-proxy/tokens.json` | OAuth tokens（`0600`） |
 | `~/.xai-proxy/client_key` | 仅加盐 SHA-256 校验串（`0600`）；每次 `generate` 覆盖 |
-| `XAI_PROXY_HOME` | 覆盖配置目录 |
+
+默认目录：`~/.xai-proxy`（`XAI_PROXY_HOME`）。
+
+### 环境变量
+
+| 变量 | 作用 |
+|------|------|
+| `XAI_PROXY_HOME` | 配置目录（默认 `~/.xai-proxy`） |
+| `XAI_PROXY_OUTBOUND` | OAuth + API 出站代理（环境变量中最高优先） |
+| `ALL_PROXY` / `all_proxy` | 标准统一代理 |
+| `HTTPS_PROXY` / `https_proxy` | 标准 HTTPS 代理 |
+| `HTTP_PROXY` / `http_proxy` | 标准 HTTP 代理 |
+| `NO_PROXY` / `no_proxy` | 代理绕过列表 |
+| `XAI_BASE_URL` | 登录时可选上游 API base（默认 `https://api.x.ai/v1`；仅 HTTPS `*.x.ai`） |
+
+出站代理优先级：`--proxy` → `XAI_PROXY_OUTBOUND` → `ALL_PROXY` → `HTTPS_PROXY` → `HTTP_PROXY` → 直连。  
+本地 client API key **无**环境变量注入（仅 `generate`）。
 
 ## 技术栈
 

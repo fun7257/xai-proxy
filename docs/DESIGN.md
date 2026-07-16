@@ -95,18 +95,34 @@ xai-proxy status | logout | version
 | Source | Notes |
 |--------|-------|
 | CLI | `--proxy socks5://…` / `http://…` (highest priority) |
-| Env | `XAI_PROXY_OUTBOUND`, then `ALL_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY` |
+| Env | See **Environment variables** below |
 | Bypass | `NO_PROXY` / `no_proxy` |
 
 Implementation: `internal/outbound`.
 
 ### Config directory
 
-| Path / variable | Purpose |
-|-----------------|---------|
+| Path | Purpose |
+|------|---------|
 | `~/.xai-proxy/tokens.json` | OAuth tokens (`0600`) |
 | `~/.xai-proxy/client_key` | Salted SHA-256 verifier only (`0600`); each `generate` overwrites |
-| `XAI_PROXY_HOME` | Override config directory |
+
+Default dir: `~/.xai-proxy` (`XAI_PROXY_HOME`).
+
+### Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `XAI_PROXY_HOME` | Config directory (default `~/.xai-proxy`) |
+| `XAI_PROXY_OUTBOUND` | Outbound proxy for OAuth + API (env highest priority) |
+| `ALL_PROXY` / `all_proxy` | Standard unified proxy |
+| `HTTPS_PROXY` / `https_proxy` | Standard HTTPS proxy |
+| `HTTP_PROXY` / `http_proxy` | Standard HTTP proxy |
+| `NO_PROXY` / `no_proxy` | Proxy bypass list |
+| `XAI_BASE_URL` | Optional inference base at login (default `https://api.x.ai/v1`; HTTPS `*.x.ai` only) |
+
+Priority for egress proxy: `--proxy` → `XAI_PROXY_OUTBOUND` → `ALL_PROXY` → `HTTPS_PROXY` → `HTTP_PROXY` → direct.  
+No env for local client API key (only `generate`).
 
 ## Stack
 

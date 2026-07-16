@@ -73,7 +73,10 @@ xai-proxy serve --host 0.0.0.0 --i-understand-non-loopback-bind
 
 ## 出站代理
 
-操作者可通过 `--proxy` 或标准环境变量，将**全部出站**（OAuth + API）走 HTTP 或 SOCKS5。代理 URL 可含凭据，不得记入日志。这不构成入站客户端鉴权。
+操作者可通过 `--proxy` 或环境变量将**全部出站**（OAuth + API）走 HTTP/SOCKS5：
+`XAI_PROXY_OUTBOUND`，然后 `ALL_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY`（及小写形式），
+绕过用 `NO_PROXY` / `no_proxy`。代理 URL 可含凭据，不得记入日志。这不构成入站
+客户端鉴权。完整列表见 README **环境变量** 一节。
 
 ## 漏洞报告
 

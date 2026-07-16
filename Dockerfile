@@ -57,7 +57,7 @@ WORKDIR /data
 ENV XAI_PROXY_HOME=/data \
     TZ=UTC
 
-# Bind 0.0.0.0 so host port publish works. Prefer publishing only to host loopback.
+# Bind 0.0.0.0 so port publish works. Prefer publishing only to host loopback.
 # /v1/* still requires the local client API key (see client_key under XAI_PROXY_HOME).
 EXPOSE 7257
 
