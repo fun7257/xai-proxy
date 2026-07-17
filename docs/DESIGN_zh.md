@@ -70,6 +70,11 @@
 
 ## OAuth 契约
 
+> **说明：** 本项目中的 xAI OAuth（设备码登录、token 刷新及相关鉴权流程）
+> 实现参考了 **[Hermes Agent](https://github.com/NousResearch/hermes-agent)**
+> 的社区集成方式。xai-proxy 为独立项目，**不**隶属于 Hermes Agent、Nous
+> Research 或 xAI。
+
 | 项 | 值 |
 |----|-----|
 | Client ID | `b1a00492-073a-47ea-816f-4c329264a828`（public device client） |

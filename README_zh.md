@@ -23,6 +23,11 @@
 
 OAuth 使用**公开**设备码 client id。xAI 可能随时调整白名单或条款；风险自负。
 
+xAI OAuth 流程（设备码登录 / refresh）的实现参考了
+**[Hermes Agent](https://github.com/NousResearch/hermes-agent)**；本项目独立，
+与 Hermes Agent 或 xAI 无隶属关系。详见
+[docs/DESIGN_zh.md](docs/DESIGN_zh.md#oauth-契约)。
+
 完整威胁模型：[docs/SECURITY_zh.md](docs/SECURITY_zh.md)。
 
 ## 适用场景

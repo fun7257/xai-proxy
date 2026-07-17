@@ -71,6 +71,12 @@ Implementation: `internal/proxy/allowlist.go`.
 
 ## OAuth contract
 
+> **Attribution:** The xAI OAuth (device-code login, token refresh, and related
+> auth flow) design in this project was implemented **with reference to
+> [Hermes Agent](https://github.com/NousResearch/hermes-agent)** (community
+> integration patterns). xai-proxy is an independent project and is **not**
+> affiliated with Hermes Agent, Nous Research, or xAI.
+
 | Item | Value |
 |------|-------|
 | Client ID | `b1a00492-073a-47ea-816f-4c329264a828` (public device client) |

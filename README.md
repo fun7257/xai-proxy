@@ -27,6 +27,11 @@ The proxy attaches your OAuth bearer and **pass-through** forwards to
 OAuth uses a **public** device-code client id. xAI may change allowlists or
 terms at any time; use at your own risk.
 
+The xAI OAuth flow (device login / refresh) was implemented **with reference to
+[Hermes Agent](https://github.com/NousResearch/hermes-agent)**; this project is
+independent and not affiliated with Hermes Agent or xAI. Details:
+[docs/DESIGN.md](docs/DESIGN.md#oauth-contract).
+
 Full threat model: [docs/SECURITY.md](docs/SECURITY.md).
 
 ## What this is for

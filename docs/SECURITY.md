@@ -67,6 +67,9 @@ Do this only behind a trusted network, VPN, or reverse proxy **with its own auth
 
 ## OAuth credentials
 
+- The xAI OAuth (device-code / refresh) flow was implemented with reference to
+  [Hermes Agent](https://github.com/NousResearch/hermes-agent); this project is
+  independent (see [DESIGN.md](DESIGN.md#oauth-contract)).
 - Uses a **public** OAuth device-code client (no client secret in the app).
 - Refresh tokens are **single-use** (rotated). Concurrent processes use a file lock.
 - Terminal refresh failures (`invalid_grant`) quarantine local tokens and require `login` again.

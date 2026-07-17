@@ -61,6 +61,9 @@ xai-proxy serve --host 0.0.0.0 --i-understand-non-loopback-bind
 
 ## OAuth 凭证
 
+- xAI OAuth（设备码 / refresh）实现参考了
+  [Hermes Agent](https://github.com/NousResearch/hermes-agent)；本项目独立（见
+  [DESIGN_zh.md](DESIGN_zh.md#oauth-契约)）
 - 使用**公开** OAuth 设备码客户端（应用内无 client secret）
 - Refresh token **单次使用**（轮转）；并发进程使用文件锁
 - 终端刷新失败（`invalid_grant`）会隔离本地 token 并要求重新 `login`
