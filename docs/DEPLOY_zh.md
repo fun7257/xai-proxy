@@ -40,8 +40,8 @@ docker build -t xai-proxy:local .
 
 ## 正式发版产物（GitHub Actions）
 
-在 GitHub 上 **Publish Release**（tag `v*`）会触发 [`.github/workflows/release.yml`](../.github/workflows/release.yml)：
-
+在 GitHub 上 **Publish Release**（tag `v*`）会触发 [`.github/workflows/release.yml`](../.github/workflows/release.yml)。  
+也可手动：**Actions → Release → Run workflow**（填写 tag，如 `v0.1.0`；可开关是否推镜像 / 上传二进制）。
 | 产物 | 平台 / 架构 |
 |------|-------------|
 | **OCI 镜像** → `ghcr.io/<owner>/xai-proxy` | `linux/amd64`、`linux/arm64` |

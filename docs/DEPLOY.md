@@ -40,8 +40,8 @@ docker build -t xai-proxy:local .
 
 ## Published releases (GitHub Actions)
 
-Publishing a GitHub **Release** (tag `v*`) runs [`.github/workflows/release.yml`](../.github/workflows/release.yml):
-
+Publishing a GitHub **Release** (tag `v*`) runs [`.github/workflows/release.yml`](../.github/workflows/release.yml).  
+You can also run it manually: **Actions → Release → Run workflow** (enter tag, e.g. `v0.1.0`; optional toggles for image / binaries).
 | Artifact | Platforms / arches |
 |----------|--------------------|
 | **OCI image** → `ghcr.io/<owner>/xai-proxy` | `linux/amd64`, `linux/arm64` |

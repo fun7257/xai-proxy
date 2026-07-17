@@ -1,16 +1,41 @@
-# Build release artifacts when a GitHub Release is published:
+# Build release artifacts:
 #   - multi-arch OCI image (linux/amd64 + linux/arm64) → GHCR
 #   - binaries for linux / darwin / windows (amd64 + arm64) → release assets
+#
+# Triggers:
+#   - GitHub Release published
+#   - Manual: Actions → Release → Run workflow
 name: Release
 
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build (e.g. v0.1.0). Prefer an existing git tag."
+        required: true
+        type: string
+      create_release:
+        description: "If the GitHub Release is missing, create it for this tag"
+        required: false
+        type: boolean
+        default: true
+      push_image:
+        description: "Build and push multi-arch image to GHCR"
+        required: false
+        type: boolean
+        default: true
+      upload_binaries:
+        description: "Build binaries and upload to the Release"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
-  contents: write   # upload release assets
+  contents: write   # upload release assets / create release
   packages: write   # push to ghcr.io
-  id-token: write   # optional provenance for build-push-action
+  id-token: write
 
 env:
   GO_VERSION: "1.26.5"
@@ -18,10 +43,107 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Resolve tag/version; ensure a GitHub Release exists for asset upload
+  # ---------------------------------------------------------------------------
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.ver.outputs.tag }}
+      version: ${{ steps.ver.outputs.version }}
+      checkout_ref: ${{ steps.ver.outputs.checkout_ref }}
+      push_image: ${{ steps.ver.outputs.push_image }}
+      upload_binaries: ${{ steps.ver.outputs.upload_binaries }}
+    steps:
+      - name: Checkout (for tag lookup)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+            PUSH_IMAGE=true
+            UPLOAD_BINARIES=true
+          else
+            TAG="${{ inputs.tag }}"
+            TAG="$(echo "$TAG" | tr -d '[:space:]')"
+            if [ -z "$TAG" ]; then
+              echo "tag input is empty" >&2
+              exit 1
+            fi
+            # Accept 0.1.0 or v0.1.0
+            case "$TAG" in
+              v*) ;;
+              *) TAG="v${TAG}" ;;
+            esac
+            PUSH_IMAGE="${{ inputs.push_image }}"
+            UPLOAD_BINARIES="${{ inputs.upload_binaries }}"
+          fi
+
+          VERSION="${TAG#v}"
+
+          # Build the tagged commit when the tag exists; else this workflow SHA
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1 \
+            || git rev-parse -q --verify "refs/tags/${TAG}^{}" >/dev/null 2>&1; then
+            CHECKOUT_REF="${TAG}"
+          elif git ls-remote --tags origin "refs/tags/${TAG}" | grep -q .; then
+            CHECKOUT_REF="${TAG}"
+          else
+            CHECKOUT_REF="${{ github.sha }}"
+            echo "Warning: git tag ${TAG} not found; building ${CHECKOUT_REF}" >&2
+          fi
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "checkout_ref=${CHECKOUT_REF}" >> "$GITHUB_OUTPUT"
+          echo "push_image=${PUSH_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "upload_binaries=${UPLOAD_BINARIES}" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag=${TAG} version=${VERSION} ref=${CHECKOUT_REF}"
+
+      - name: Ensure GitHub Release exists
+        if: steps.ver.outputs.upload_binaries == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          if gh release view "${TAG}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists"
+            exit 0
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.create_release }}" != "true" ]; then
+            echo "Release ${TAG} missing and create_release=false" >&2
+            exit 1
+          fi
+          REF="${{ steps.ver.outputs.checkout_ref }}"
+          if [ "${REF}" = "${TAG}" ]; then
+            gh release create "${TAG}" \
+              --repo "${{ github.repository }}" \
+              --title "${TAG}" \
+              --generate-notes \
+              --verify-tag
+          else
+            echo "Creating release ${TAG} targeting ${REF}" >&2
+            gh release create "${TAG}" \
+              --repo "${{ github.repository }}" \
+              --title "${TAG}" \
+              --generate-notes \
+              --target "${REF}"
+          fi
+
+  # ---------------------------------------------------------------------------
   # Binaries: linux, darwin, windows × amd64, arm64
   # ---------------------------------------------------------------------------
   binaries:
     name: Binary (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: prepare
+    if: needs.prepare.outputs.upload_binaries == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -55,27 +177,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Version from tag
-        id: ver
-        run: |
-          TAG="${{ github.event.release.tag_name }}"
-          # v0.1.0 → 0.1.0 for ldflags / artifact names
-          VERSION="${TAG#v}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-          VERSION: ${{ steps.ver.outputs.version }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
           out="xai-proxy${{ matrix.ext }}"
@@ -97,7 +212,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release upload "${{ steps.ver.outputs.tag }}" dist/* \
+          gh release upload "${{ needs.prepare.outputs.tag }}" dist/* \
             --clobber \
             --repo "${{ github.repository }}"
 
@@ -106,7 +221,8 @@ jobs:
   # ---------------------------------------------------------------------------
   checksums:
     name: Checksums
-    needs: binaries
+    needs: [prepare, binaries]
+    if: needs.prepare.outputs.upload_binaries == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Download release assets and write SHA256SUMS
@@ -114,15 +230,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="${{ github.event.release.tag_name }}"
+          TAG="${{ needs.prepare.outputs.tag }}"
           mkdir -p assets
-          # Only binary archives from this workflow (not prior random files)
           gh release download "${TAG}" \
             --repo "${{ github.repository }}" \
             --dir assets \
             --pattern 'xai-proxy_*'
           cd assets
-          # Drop previous checksums if re-uploaded
           rm -f SHA256SUMS
           shasum -a 256 xai-proxy_* > SHA256SUMS
           cat SHA256SUMS
@@ -135,20 +249,19 @@ jobs:
   # ---------------------------------------------------------------------------
   image:
     name: Container image
+    needs: prepare
+    if: needs.prepare.outputs.push_image == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
 
-      - name: Version from tag
+      - name: Image name
         id: ver
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          VERSION="${TAG#v}"
-          # GHCR package names must be lowercase
           IMAGE="$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
@@ -170,10 +283,10 @@ jobs:
         with:
           images: ${{ steps.ver.outputs.image }}
           tags: |
-            type=semver,pattern={{version}},value=${{ steps.ver.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.ver.outputs.version }}
+            type=semver,pattern={{version}},value=${{ needs.prepare.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.prepare.outputs.version }}
             type=raw,value=latest
-            type=raw,value=${{ steps.ver.outputs.tag }}
+            type=raw,value=${{ needs.prepare.outputs.tag }}
 
       - name: Build and push (linux/amd64, linux/arm64)
         uses: docker/build-push-action@v6
@@ -185,7 +298,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ steps.ver.outputs.version }}
+            VERSION=${{ needs.prepare.outputs.version }}
             GO_VERSION=${{ env.GO_VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
