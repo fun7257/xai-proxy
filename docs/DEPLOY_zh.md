@@ -38,6 +38,31 @@ container build -t xai-proxy:local -f Dockerfile .
 docker build -t xai-proxy:local .
 ```
 
+## 正式发版产物（GitHub Actions）
+
+在 GitHub 上 **Publish Release**（tag `v*`）会触发 [`.github/workflows/release.yml`](../.github/workflows/release.yml)：
+
+| 产物 | 平台 / 架构 |
+|------|-------------|
+| **OCI 镜像** → `ghcr.io/<owner>/xai-proxy` | `linux/amd64`、`linux/arm64` |
+| **二进制**（Release Assets） | linux / darwin / windows × amd64 + arm64 |
+| **校验和** | 同 Release 上的 `SHA256SUMS` |
+
+镜像 tag 示例（`v0.1.1`）：`0.1.1`、`0.1`、`v0.1.1`、`latest`。
+
+```bash
+# 拉取多架构镜像（Docker / 兼容实现）
+docker pull ghcr.io/<owner>/xai-proxy:latest
+# 或固定版本: ghcr.io/<owner>/xai-proxy:0.1.1
+
+# 二进制：从 GitHub Release 下载，例如
+#   xai-proxy_0.1.1_darwin_arm64.tar.gz
+#   xai-proxy_0.1.1_linux_amd64.tar.gz
+#   xai-proxy_0.1.1_windows_amd64.zip
+```
+
+将 `<owner>` 换成仓库 owner（本仓库为 `fun7257`）。  
+若 package 为 private，需 `docker login ghcr.io`（PAT 带 `read:packages`）。
 ## 运行（推荐：绑定宿主机配置目录）
 
 把宿主机配置目录挂进容器，可与本机原生安装共用 token / key 校验串，并用本机 uid 避免权限问题。

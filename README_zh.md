@@ -49,6 +49,8 @@ make build
 # 或: go build -o xai-proxy ./cmd/xai-proxy
 ```
 
+**发版二进制 / 多架构镜像：** 在 GitHub 上发布 Release（tag `v*`）后，CI 会构建 linux/darwin/windows 归档，并推送 `ghcr.io/<owner>/xai-proxy`（`linux/amd64` + `linux/arm64`）。详见 [docs/DEPLOY_zh.md](docs/DEPLOY_zh.md)。
+
 ## 使用
 
 ```bash

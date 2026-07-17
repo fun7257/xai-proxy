@@ -3,6 +3,7 @@
 *.exe
 *.test
 *.out
+/dist/
 
 # Local / runtime
 /tmp/

@@ -1,0 +1,192 @@
+# Build release artifacts when a GitHub Release is published:
+#   - multi-arch OCI image (linux/amd64 + linux/arm64) → GHCR
+#   - binaries for linux / darwin / windows (amd64 + arm64) → release assets
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write   # upload release assets
+  packages: write   # push to ghcr.io
+  id-token: write   # optional provenance for build-push-action
+
+env:
+  GO_VERSION: "1.26.5"
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Binaries: linux, darwin, windows × amd64, arm64
+  # ---------------------------------------------------------------------------
+  binaries:
+    name: Binary (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            ext: ""
+            archive: tar.gz
+          - goos: linux
+            goarch: arm64
+            ext: ""
+            archive: tar.gz
+          - goos: darwin
+            goarch: amd64
+            ext: ""
+            archive: tar.gz
+          - goos: darwin
+            goarch: arm64
+            ext: ""
+            archive: tar.gz
+          - goos: windows
+            goarch: amd64
+            ext: ".exe"
+            archive: zip
+          - goos: windows
+            goarch: arm64
+            ext: ".exe"
+            archive: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Version from tag
+        id: ver
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          # v0.1.0 → 0.1.0 for ldflags / artifact names
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          out="xai-proxy${{ matrix.ext }}"
+          go build -trimpath \
+            -ldflags="-s -w -X main.version=${VERSION}" \
+            -o "${out}" \
+            ./cmd/xai-proxy
+          mkdir -p dist
+          asset="xai-proxy_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            zip -9 "dist/${asset}.zip" "${out}"
+          else
+            tar -czf "dist/${asset}.tar.gz" "${out}"
+          fi
+          ls -la dist/
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "${{ steps.ver.outputs.tag }}" dist/* \
+            --clobber \
+            --repo "${{ github.repository }}"
+
+  # ---------------------------------------------------------------------------
+  # Checksums for all binary assets (after matrix finishes)
+  # ---------------------------------------------------------------------------
+  checksums:
+    name: Checksums
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets and write SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.release.tag_name }}"
+          mkdir -p assets
+          # Only binary archives from this workflow (not prior random files)
+          gh release download "${TAG}" \
+            --repo "${{ github.repository }}" \
+            --dir assets \
+            --pattern 'xai-proxy_*'
+          cd assets
+          # Drop previous checksums if re-uploaded
+          rm -f SHA256SUMS
+          shasum -a 256 xai-proxy_* > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "${TAG}" SHA256SUMS \
+            --clobber \
+            --repo "${{ github.repository }}"
+
+  # ---------------------------------------------------------------------------
+  # Multi-arch image → ghcr.io/<owner>/<repo>
+  # ---------------------------------------------------------------------------
+  image:
+    name: Container image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Version from tag
+        id: ver
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          # GHCR package names must be lowercase
+          IMAGE="$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.ver.outputs.image }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.ver.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.ver.outputs.version }}
+            type=raw,value=latest
+            type=raw,value=${{ steps.ver.outputs.tag }}
+
+      - name: Build and push (linux/amd64, linux/arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.ver.outputs.version }}
+            GO_VERSION=${{ env.GO_VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false

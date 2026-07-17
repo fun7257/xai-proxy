@@ -38,6 +38,31 @@ container build -t xai-proxy:local -f Dockerfile .
 docker build -t xai-proxy:local .
 ```
 
+## Published releases (GitHub Actions)
+
+Publishing a GitHub **Release** (tag `v*`) runs [`.github/workflows/release.yml`](../.github/workflows/release.yml):
+
+| Artifact | Platforms / arches |
+|----------|--------------------|
+| **OCI image** → `ghcr.io/<owner>/xai-proxy` | `linux/amd64`, `linux/arm64` |
+| **Binaries** (release assets) | linux / darwin / windows × amd64 + arm64 |
+| **Checksums** | `SHA256SUMS` on the same release |
+
+Tags on the image (example for `v0.1.1`): `0.1.1`, `0.1`, `v0.1.1`, `latest`.
+
+```bash
+# Pull multi-arch image (Docker / compatible)
+docker pull ghcr.io/<owner>/xai-proxy:latest
+# or pin: ghcr.io/<owner>/xai-proxy:0.1.1
+
+# Binary: download from the GitHub Release page, e.g.
+#   xai-proxy_0.1.1_darwin_arm64.tar.gz
+#   xai-proxy_0.1.1_linux_amd64.tar.gz
+#   xai-proxy_0.1.1_windows_amd64.zip
+```
+
+Replace `<owner>` with the GitHub user or org (this repo: `fun7257`).  
+If the package is private, `docker login ghcr.io` with a PAT that has `read:packages`.
 ## Run (recommended: bind-mount host config)
 
 Share the host config directory so the container reuses the same tokens / key verifier as a native install, and file ownership matches your user.

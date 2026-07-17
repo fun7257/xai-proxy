@@ -53,6 +53,7 @@ make build
 # or: go build -o xai-proxy ./cmd/xai-proxy
 ```
 
+**Release binaries / multi-arch image:** publish a GitHub Release (tag `v*`) — CI builds linux/darwin/windows archives and pushes `ghcr.io/<owner>/xai-proxy` (`linux/amd64` + `linux/arm64`). See [docs/DEPLOY.md](docs/DEPLOY.md).
 ## Usage
 
 ```bash
