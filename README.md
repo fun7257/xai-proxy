@@ -206,10 +206,12 @@ xai-proxy status | logout | version
 |-----|---------|
 | [docs/SECURITY.md](docs/SECURITY.md) | Scope, threat model, reporting |
 | [docs/DESIGN.md](docs/DESIGN.md) | Architecture, paths, OAuth, CLI |
+| [docs/DEPLOY.md](docs/DEPLOY.md) | OCI image build & run (Apple Container / Docker) |
 | [AGENTS.md](AGENTS.md) | Dev style & security guidelines |
 
 Chinese translations use the `*_zh.md` suffix (e.g. [README_zh.md](README_zh.md),
-[docs/DESIGN_zh.md](docs/DESIGN_zh.md), [docs/SECURITY_zh.md](docs/SECURITY_zh.md)).
+[docs/DESIGN_zh.md](docs/DESIGN_zh.md), [docs/SECURITY_zh.md](docs/SECURITY_zh.md),
+[docs/DEPLOY_zh.md](docs/DEPLOY_zh.md)).
 `AGENTS.md` is English-only. Docs and code comments are English by default.
 
 ## Disclaimer

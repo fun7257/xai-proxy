@@ -199,6 +199,7 @@ xai-proxy status | logout | version
 |------|------|
 | [docs/SECURITY_zh.md](docs/SECURITY_zh.md) | 范围、威胁模型、报告 |
 | [docs/DESIGN_zh.md](docs/DESIGN_zh.md) | 架构、路径、OAuth、CLI |
+| [docs/DEPLOY_zh.md](docs/DEPLOY_zh.md) | OCI 镜像构建与运行（Apple Container / Docker） |
 | [AGENTS.md](AGENTS.md) | 开发风格与安全准则（仅英文） |
 
 文档与代码注释以**英文**为准；产品类中文文档见并行 `*_zh.md`。`AGENTS.md` 无中文版。

@@ -1,10 +1,11 @@
 # syntax=docker/dockerfile:1.7
 #
 # Multi-stage production image for xai-proxy.
-# Build:     docker build -t xai-proxy:local .
-# Generate:  docker run --rm -v xai-data:/data xai-proxy:local generate
-# Login:     docker run --rm -it -v xai-data:/data xai-proxy:local login --no-browser
-# Serve:     docker run --rm -p 127.0.0.1:7257:7257 -v xai-data:/data xai-proxy:local
+# Build:  docker build -t xai-proxy:local .
+# Serve:  docker run --rm -it -p 127.0.0.1:7257:7257 -v xai-data:/data xai-proxy:local
+#         (entrypoint auto-generates client key if missing, then device-login if needed)
+# Pass-through CLI (no bootstrap): generate | login | status | logout | version
+#   docker run --rm -v xai-data:/data xai-proxy:local status
 
 ARG GO_VERSION=1.26.5
 
@@ -49,6 +50,8 @@ RUN apk add --no-cache ca-certificates tzdata wget \
     && chown -R xai:xai /data
 
 COPY --from=builder /out/xai-proxy /usr/local/bin/xai-proxy
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
 
 USER xai:xai
 WORKDIR /data
@@ -64,8 +67,8 @@ EXPOSE 7257
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD wget -qO- http://127.0.0.1:7257/health >/dev/null || exit 1
 
-ENTRYPOINT ["/usr/local/bin/xai-proxy"]
-# Default: serve only (run generate + login in separate steps first).
+# Bootstrap on serve: generate client key (log once) + login --no-browser if needed.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 # --i-understand-non-loopback-bind: allow 0.0.0.0 so published ports work.
-# Client API key auth on /v1/* remains required (see xai-proxy generate).
+# Client API key auth on /v1/* remains required.
 CMD ["serve", "--host", "0.0.0.0", "--port", "7257", "--i-understand-non-loopback-bind"]
