@@ -14,6 +14,7 @@ import (
 
 	"xai-proxy/internal/auth"
 	"xai-proxy/internal/credential"
+	"xai-proxy/internal/outbound"
 	"xai-proxy/internal/store"
 )
 
@@ -52,13 +53,15 @@ func setupTokens(t *testing.T) (access string, mgr *credential.Manager) {
 }
 
 func rewriteToUpstream(upstream *httptest.Server) *http.Client {
+	// Same compression contract as production egress (outbound.PassThroughTransport).
+	passthrough := outbound.PassThroughTransport()
 	return &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			req2 := req.Clone(req.Context())
 			req2.URL.Scheme = "http"
 			req2.URL.Host = strings.TrimPrefix(upstream.URL, "http://")
 			req2.RequestURI = ""
-			return http.DefaultTransport.RoundTrip(req2)
+			return passthrough.RoundTrip(req2)
 		}),
 	}
 }

@@ -99,15 +99,12 @@ func ClassifyProxyURL(raw string) (SchemeKind, error) {
 	}
 }
 
-// NewTransport builds an *http.Transport with HTTP and/or SOCKS proxy support.
-func NewTransport(opts Options) (*http.Transport, error) {
-	proxyURL := ResolveProxyURL(opts.ProxyURL)
-	kind, err := ClassifyProxyURL(proxyURL)
-	if err != nil {
-		return nil, err
-	}
-
-	base := &http.Transport{
+// passThroughBaseTransport is the single egress transport contract for xai-proxy:
+// never transparently decompress. Compression is negotiated end-to-end between
+// the API client and upstream; this process only forwards bytes and headers.
+// All NewTransport variants and DirectClient share this base.
+func passThroughBaseTransport() *http.Transport {
+	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
@@ -117,6 +114,7 @@ func NewTransport(opts Options) (*http.Transport, error) {
 		// stream/connection can stall multiplexed traffic until process restart.
 		ForceAttemptHTTP2: false,
 		TLSNextProto:      map[string]func(authority string, c *tls.Conn) http.RoundTripper{},
+		DisableCompression:  true,
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 32,
 		MaxConnsPerHost:     64,
@@ -126,6 +124,34 @@ func NewTransport(opts Options) (*http.Transport, error) {
 		ResponseHeaderTimeout: 120 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
+}
+
+// PassThroughTransport returns a direct egress transport with the package
+// pass-through compression contract (DisableCompression, hang mitigations).
+// Callers that inject a custom RoundTrip (tests) or need a no-proxy fallback
+// should use this instead of constructing bare http.Transport literals.
+func PassThroughTransport() *http.Transport {
+	return passThroughBaseTransport()
+}
+
+// DirectClient returns an http.Client using PassThroughTransport and the given
+// timeout (0 = no client-level timeout; streaming-safe).
+func DirectClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: passThroughBaseTransport(),
+	}
+}
+
+// NewTransport builds an *http.Transport with HTTP and/or SOCKS proxy support.
+func NewTransport(opts Options) (*http.Transport, error) {
+	proxyURL := ResolveProxyURL(opts.ProxyURL)
+	kind, err := ClassifyProxyURL(proxyURL)
+	if err != nil {
+		return nil, err
+	}
+
+	base := passThroughBaseTransport()
 
 	switch kind {
 	case SchemeNone:
@@ -237,13 +263,12 @@ func NewClient(opts Options) (*http.Client, error) {
 	}, nil
 }
 
-// MustClient is NewClient that panics only on programmer error; on proxy URL
-// errors it returns a direct client with no proxy (and is unused). Prefer NewClient.
+// ClientOrDirect is NewClient that falls back to DirectClient when the proxy
+// URL is invalid, so optional proxy misconfig does not crash hard paths.
 func ClientOrDirect(opts Options) *http.Client {
 	c, err := NewClient(opts)
 	if err != nil {
-		// Fall back to direct so existing tests with invalid optional proxy don't crash hard paths.
-		return &http.Client{Timeout: opts.Timeout}
+		return DirectClient(opts.Timeout)
 	}
 	return c
 }

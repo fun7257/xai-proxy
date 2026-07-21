@@ -2,16 +2,62 @@ package proxy
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"xai-proxy/internal/outbound"
 )
+
+// TestConfig_DefaultUpstreamClient_DisableCompression asserts the production
+// default client (no injected Upstream) uses the outbound pass-through contract.
+func TestConfig_DefaultUpstreamClient_DisableCompression(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "")
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("ALL_PROXY", "")
+	t.Setenv("XAI_PROXY_OUTBOUND", "")
+
+	c := &Config{}
+	client := c.upstreamClient()
+	if client == nil || client.Transport == nil {
+		t.Fatal("expected non-nil client and transport")
+	}
+	tr, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport type %T, want *http.Transport from outbound.NewTransport", client.Transport)
+	}
+	if !tr.DisableCompression {
+		t.Fatal("default upstream transport must DisableCompression for pass-through")
+	}
+}
+
+// TestConfig_UpstreamClient_FallsBackToDirectClient ensures NewClient errors
+// do not construct a bare http.Transport in the proxy package.
+func TestConfig_UpstreamClient_FallsBackToDirectClient(t *testing.T) {
+	// Force NewClient to fail: invalid explicit proxy scheme via env resolution.
+	t.Setenv("XAI_PROXY_OUTBOUND", "not-a-valid-scheme://x")
+	t.Setenv("HTTP_PROXY", "")
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("ALL_PROXY", "")
+
+	c := &Config{}
+	client := c.upstreamClient()
+	tr, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport type %T", client.Transport)
+	}
+	if !tr.DisableCompression {
+		t.Fatal("DirectClient fallback must keep pass-through contract")
+	}
+}
 
 // TestStreamCopy_ByteIdentical drives streamCopy (used by doUpstream) with a
 // multi-chunk source and asserts no byte loss or rewrite.
@@ -56,6 +102,76 @@ func TestStreamCopy_ContextCancelUnblocks(t *testing.T) {
 		t.Fatal("streamCopy hung after context cancel (would freeze proxy)")
 	}
 	_ = pw.Close()
+}
+
+// TestProxy_GzipPassThrough keeps Content-Encoding and compressed bytes intact.
+// Regression: stripping Content-Encoding while forwarding Accept-Encoding left
+// clients with gzip bodies and no encoding header (corrupt JSON/SSE).
+func TestProxy_GzipPassThrough(t *testing.T) {
+	plain := []byte(`{"id":"chatcmpl-gz","choices":[{"message":{"content":"hi"}}]}`)
+	var gzipped bytes.Buffer
+	zw := gzip.NewWriter(&gzipped)
+	if _, err := zw.Write(plain); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	wantBody := gzipped.Bytes()
+
+	var gotAcceptEncoding string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAcceptEncoding = r.Header.Get("Accept-Encoding")
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Length", strconv.Itoa(len(wantBody)))
+		_, _ = w.Write(wantBody)
+	}))
+	defer upstream.Close()
+
+	_, mgr := setupTokens(t)
+	srv := newProxyServer(t, mgr, upstream)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/chat/completions", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	// Client advertised gzip — the historical bug path (Transport does not
+	// auto-decompress when Accept-Encoding is already set).
+	req.Header.Set("Accept-Encoding", "gzip")
+	// Observe wire body as the proxy wrote it (no client-side auto-decompress).
+	client := outbound.DirectClient(0)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	got, _ := io.ReadAll(resp.Body)
+
+	if gotAcceptEncoding != "gzip" {
+		t.Fatalf("upstream Accept-Encoding=%q want gzip (must be forwarded)", gotAcceptEncoding)
+	}
+	if ce := resp.Header.Get("Content-Encoding"); ce != "gzip" {
+		t.Fatalf("client Content-Encoding=%q want gzip (must not strip)", ce)
+	}
+	if cl := resp.Header.Get("Content-Length"); cl != strconv.Itoa(len(wantBody)) {
+		t.Fatalf("client Content-Length=%q want %d (must match compressed body)", cl, len(wantBody))
+	}
+	if !bytes.Equal(got, wantBody) {
+		t.Fatalf("gzip body not pass-through: got %d bytes want %d", len(got), len(wantBody))
+	}
+	// Sanity: body is actually gzip of plain.
+	gr, err := gzip.NewReader(bytes.NewReader(got))
+	if err != nil {
+		t.Fatalf("response is not valid gzip: %v", err)
+	}
+	decoded, err := io.ReadAll(gr)
+	_ = gr.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decoded, plain) {
+		t.Fatalf("decoded mismatch: %q", decoded)
+	}
 }
 
 // TestProxy_JSONPassThroughByteIdentical hits the real forward path with an

@@ -7,7 +7,7 @@ import (
 )
 
 // version can be overridden at link time: -ldflags "-X main.version=..."
-var version = "0.1.0"
+var version = "0.1.1"
 
 func main() {
 	cli.Version = version

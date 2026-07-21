@@ -36,6 +36,34 @@ func TestNewTransport_HangMitigations(t *testing.T) {
 	if tr.MaxIdleConnsPerHost < 8 {
 		t.Fatalf("MaxIdleConnsPerHost too small: %d", tr.MaxIdleConnsPerHost)
 	}
+	if !tr.DisableCompression {
+		t.Fatal("DisableCompression must be true for pass-through Content-Encoding")
+	}
 	// Compile-time-ish use of tls.Conn in type of map value
 	var _ map[string]func(string, *tls.Conn) http.RoundTripper = tr.TLSNextProto
+}
+
+func TestPassThroughTransport_AndDirectClient(t *testing.T) {
+	tr := PassThroughTransport()
+	if tr == nil || !tr.DisableCompression {
+		t.Fatal("PassThroughTransport must disable compression")
+	}
+	// Distinct instances so callers cannot mutate a shared global.
+	tr2 := PassThroughTransport()
+	if tr == tr2 {
+		t.Fatal("PassThroughTransport should return a new instance each call")
+	}
+	c := DirectClient(0)
+	ctr, ok := c.Transport.(*http.Transport)
+	if !ok || !ctr.DisableCompression {
+		t.Fatal("DirectClient must use pass-through transport")
+	}
+}
+
+func TestClientOrDirect_InvalidProxyFallsBackToDirect(t *testing.T) {
+	c := ClientOrDirect(Options{ProxyURL: "not-a-valid-scheme://x", Timeout: 0})
+	tr, ok := c.Transport.(*http.Transport)
+	if !ok || !tr.DisableCompression {
+		t.Fatal("ClientOrDirect fallback must be DirectClient pass-through transport")
+	}
 }

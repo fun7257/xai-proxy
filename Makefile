@@ -1,7 +1,7 @@
 GO_VERSION := 1.26.5
 BINARY := xai-proxy
 PKG := ./cmd/xai-proxy
-VERSION ?= 0.1.0
+VERSION ?= 0.1.1
 DIST := dist
 
 # Cross-compile targets (same set as .github/workflows/release.yml).

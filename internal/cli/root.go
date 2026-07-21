@@ -21,7 +21,7 @@ import (
 )
 
 // Version is set by main.
-var Version = "0.1.0"
+var Version = "0.1.1"
 
 // Run is the CLI entrypoint.
 func Run(args []string) int {

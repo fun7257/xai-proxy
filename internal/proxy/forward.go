@@ -43,10 +43,10 @@ func (c *Config) upstreamClient() *http.Client {
 		return c.Upstream
 	}
 	// Streaming API: no client-level total Timeout (body may stream for a long time).
-	// ResponseHeaderTimeout is set on the transport in outbound.NewTransport.
+	// ResponseHeaderTimeout lives on outbound pass-through transport.
 	client, err := outbound.NewClient(outbound.Options{Timeout: 0})
 	if err != nil {
-		return &http.Client{Timeout: 0}
+		return outbound.DirectClient(0)
 	}
 	return client
 }
