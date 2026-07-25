@@ -3,18 +3,49 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"xai-proxy/internal/auth"
 	"xai-proxy/internal/credential"
 	"xai-proxy/internal/outbound"
 )
+
+// Default stream timeouts (used when Config fields are zero).
+const (
+	DefaultStreamIdleTimeout      = 3 * time.Minute
+	DefaultStreamWriteIdleTimeout = 60 * time.Second
+)
+
+// Stable stream end_reason labels for observability (never log secrets/bodies).
+const (
+	StreamEndEOF           = "eof"
+	StreamEndClientCancel  = "client_cancel"
+	StreamEndIdleTimeout   = "idle_timeout"
+	StreamEndWriteError    = "write_error"
+	StreamEndUpstreamError = "upstream_error"
+)
+
+// ErrStreamIdleTimeout is returned when no upstream body bytes arrive within
+// StreamIdleTimeout after the response status has already been written
+// (streamed=true). Clients therefore see a truncated stream, not a JSON 504;
+// the failure is reported via the stream end_reason log field.
+// It implements net.Error with Timeout() true so writeUpstreamError would map
+// it to HTTP 504 if ever returned before headers (defense in depth only).
+var ErrStreamIdleTimeout error = streamIdleTimeoutError{}
+
+type streamIdleTimeoutError struct{}
+
+func (streamIdleTimeoutError) Error() string   { return "upstream stream idle timeout" }
+func (streamIdleTimeoutError) Timeout() bool   { return true }
+func (streamIdleTimeoutError) Temporary() bool { return true }
 
 // Config for the reverse proxy.
 type Config struct {
@@ -29,6 +60,15 @@ type Config struct {
 	Logger       *slog.Logger
 	// Upstream client — no total Timeout so streams can run long.
 	Upstream *http.Client
+	// StreamIdleTimeout is the max time between upstream body bytes.
+	// 0 = DefaultStreamIdleTimeout (3m); negative = disable (tests).
+	StreamIdleTimeout time.Duration
+	// StreamWriteIdleTimeout is the max time allowed for a single client write
+	// (and Flush). It is set immediately before each write and cleared after,
+	// so long healthy gaps between upstream chunks do not expire a sticky
+	// connection write deadline. 0 = DefaultStreamWriteIdleTimeout (60s);
+	// negative = disable (tests).
+	StreamWriteIdleTimeout time.Duration
 }
 
 func (c *Config) logger() *slog.Logger {
@@ -63,6 +103,30 @@ func (c *Config) isAllowed(rel string) bool {
 		return pathAllowed(rel, c.AllowedPaths)
 	}
 	return PathAllowed(rel)
+}
+
+// streamIdleTimeoutResolved returns the effective idle-read timeout.
+// 0 means disabled.
+func (c *Config) streamIdleTimeoutResolved() time.Duration {
+	if c.StreamIdleTimeout < 0 {
+		return 0
+	}
+	if c.StreamIdleTimeout == 0 {
+		return DefaultStreamIdleTimeout
+	}
+	return c.StreamIdleTimeout
+}
+
+// streamWriteIdleTimeoutResolved returns the effective client write idle window.
+// 0 means disabled.
+func (c *Config) streamWriteIdleTimeoutResolved() time.Duration {
+	if c.StreamWriteIdleTimeout < 0 {
+		return 0
+	}
+	if c.StreamWriteIdleTimeout == 0 {
+		return DefaultStreamWriteIdleTimeout
+	}
+	return c.StreamWriteIdleTimeout
 }
 
 // HandleProxyWithRetry implements credential attach + one 401 retry.
@@ -174,6 +238,7 @@ func (c *Config) doUpstream(ctx context.Context, w http.ResponseWriter, r *http.
 	}
 
 	copyResponseHeaders(w.Header(), resp.Header)
+	applySSEResponseHeaders(w.Header())
 	w.WriteHeader(resp.StatusCode)
 	streamed = true
 
@@ -181,19 +246,45 @@ func (c *Config) doUpstream(ctx context.Context, w http.ResponseWriter, r *http.
 	if f, ok := w.(http.Flusher); ok {
 		flush = f
 	}
+	streamStart := time.Now()
 	// Pass-through body: no full-buffer requirement; cancel closes upstream on client gone.
-	if err := streamCopy(ctx, w, resp.Body, flush); err != nil {
-		return resp.StatusCode, true, err
+	written, reason, copyErr := streamCopy(ctx, w, resp.Body, streamCopyConfig{
+		IdleTimeout:      c.streamIdleTimeoutResolved(),
+		WriteIdleTimeout: c.streamWriteIdleTimeoutResolved(),
+		Flush:            flush,
+		ResponseWriter:   w,
+	})
+	c.logger().Info("proxy stream end",
+		"path", rel,
+		"status", resp.StatusCode,
+		"bytes", written,
+		"duration_ms", time.Since(streamStart).Milliseconds(),
+		"end_reason", reason,
+	)
+	if copyErr != nil {
+		return resp.StatusCode, true, copyErr
 	}
 	return resp.StatusCode, true, nil
 }
 
+// streamCopyConfig holds resolved streaming options (0 idle/write = feature off).
+type streamCopyConfig struct {
+	IdleTimeout      time.Duration
+	WriteIdleTimeout time.Duration
+	Flush            http.Flusher
+	ResponseWriter   http.ResponseWriter // optional; enables SetWriteDeadline
+}
+
 // streamCopy copies src→dst in chunks without rewriting bytes.
 // On ctx cancel it closes src so a blocked Read unblocks (avoids stuck goroutines).
-// When flush is non-nil, each successful write is flushed for SSE/chunked clients.
-func streamCopy(ctx context.Context, dst io.Writer, src io.ReadCloser, flush http.Flusher) error {
+// When IdleTimeout > 0, no upstream bytes for that duration closes src and returns
+// ErrStreamIdleTimeout. When WriteIdleTimeout > 0 and ResponseWriter is set,
+// a client write deadline is applied only around each write+flush (not across
+// upstream Read waits). When Flush is non-nil, each successful write is flushed
+// for SSE/chunked clients.
+func streamCopy(ctx context.Context, dst io.Writer, src io.ReadCloser, cfg streamCopyConfig) (written int64, reason string, err error) {
 	if src == nil {
-		return nil
+		return 0, StreamEndEOF, nil
 	}
 	defer src.Close()
 
@@ -202,25 +293,68 @@ func streamCopy(ctx context.Context, dst io.Writer, src io.ReadCloser, flush htt
 	})
 	defer stop()
 
+	var idleTimedOut atomic.Bool
+	var idleTimer *time.Timer
+	if cfg.IdleTimeout > 0 {
+		idleTimer = time.AfterFunc(cfg.IdleTimeout, func() {
+			idleTimedOut.Store(true)
+			_ = src.Close()
+		})
+		defer idleTimer.Stop()
+	}
+
 	buf := make([]byte, 32*1024)
 	for {
 		n, readErr := src.Read(buf)
 		if n > 0 {
+			// Reset idle window on upstream bytes. If Stop returns false the
+			// AfterFunc already started; idleTimedOut will surface on readErr.
+			if idleTimer != nil && !idleTimedOut.Load() && idleTimer.Stop() {
+				idleTimer.Reset(cfg.IdleTimeout)
+			}
+			// Apply write deadline only around client write+flush. Never leave
+			// a deadline armed across a long upstream Read: once exceeded,
+			// further SetWriteDeadline cannot recover (sticky on HTTP/1 after
+			// a failed Write; HTTP/2 kills the stream from the timer alone).
+			if cfg.WriteIdleTimeout > 0 {
+				setClientWriteDeadline(cfg.ResponseWriter, time.Now().Add(cfg.WriteIdleTimeout))
+			}
 			if err := writeAll(dst, buf[:n]); err != nil {
 				_ = src.Close()
-				return err
+				return written, StreamEndWriteError, err
 			}
-			if flush != nil {
-				flush.Flush()
+			written += int64(n)
+			if cfg.Flush != nil {
+				cfg.Flush.Flush()
+			}
+			if cfg.WriteIdleTimeout > 0 {
+				setClientWriteDeadline(cfg.ResponseWriter, time.Time{})
 			}
 		}
 		if readErr == io.EOF {
-			return nil
+			return written, StreamEndEOF, nil
 		}
 		if readErr != nil {
-			return readErr
+			if idleTimedOut.Load() {
+				return written, StreamEndIdleTimeout, ErrStreamIdleTimeout
+			}
+			if ctx.Err() != nil {
+				return written, StreamEndClientCancel, readErr
+			}
+			return written, StreamEndUpstreamError, readErr
 		}
 	}
+}
+
+// setClientWriteDeadline sets or clears the ResponseWriter write deadline when
+// supported (http.ResponseController). No-op if rw is nil. Errors (including
+// ErrNotSupported) are ignored so unsupported wrappers degrade safely.
+func setClientWriteDeadline(rw http.ResponseWriter, deadline time.Time) {
+	if rw == nil {
+		return
+	}
+	rc := http.NewResponseController(rw)
+	_ = rc.SetWriteDeadline(deadline)
 }
 
 // writeAll writes p fully (handles short writes) without modifying content.
@@ -240,6 +374,33 @@ func writeAll(w io.Writer, p []byte) error {
 	return nil
 }
 
+// ClassifyStreamEndReason maps a stream error to a stable end_reason label.
+// Prefer the reason returned by streamCopy on the hot path; this helper is for
+// tests and diagnostics when only an error value is available.
+func ClassifyStreamEndReason(err error, clientCtx context.Context) string {
+	if err == nil {
+		return StreamEndEOF
+	}
+	if errors.Is(err, ErrStreamIdleTimeout) {
+		return StreamEndIdleTimeout
+	}
+	if clientCtx != nil && clientCtx.Err() != nil {
+		return StreamEndClientCancel
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return StreamEndClientCancel
+	}
+	// Client-side write failures: net.OpError with Op=="write", or classic EPIPE wording.
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op == "write" {
+		return StreamEndWriteError
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "broken pipe") {
+		return StreamEndWriteError
+	}
+	return StreamEndUpstreamError
+}
+
 func (c *Config) writeAuthError(w http.ResponseWriter, err error) {
 	if auth.IsTierDenied(err) {
 		writeJSONError(w, http.StatusForbidden, err.Error(), "upstream_tier_denied")
@@ -253,6 +414,9 @@ func (c *Config) writeAuthError(w http.ResponseWriter, err error) {
 }
 
 func (c *Config) writeUpstreamError(w http.ResponseWriter, err error) {
+	// Timeouts (ResponseHeaderTimeout, dial, or ErrStreamIdleTimeout if ever
+	// returned before headers) → 504. Mid-stream idle already wrote status;
+	// those failures never reach this helper.
 	if ne, ok := err.(net.Error); ok && ne.Timeout() {
 		writeJSONError(w, http.StatusGatewayTimeout, "upstream request timed out", "upstream_timeout")
 		return

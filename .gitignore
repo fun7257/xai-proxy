@@ -21,6 +21,9 @@ audio.wav
 *.swp
 *~
 
+# Local agent / workflow tooling (never commit)
+.grok/
+
 # Secrets / local data (never commit OAuth tokens)
 .env
 .env.*

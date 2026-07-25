@@ -60,3 +60,20 @@ func copyResponseHeaders(dst, src http.Header) {
 		}
 	}
 }
+
+// applySSEResponseHeaders adds proxy-friendly defaults for text/event-stream
+// responses. Call after copyResponseHeaders and before WriteHeader.
+// Non-SSE responses are left unchanged. Existing Cache-Control / X-Accel-Buffering
+// values are not clobbered.
+func applySSEResponseHeaders(h http.Header) {
+	ct := h.Get("Content-Type")
+	if !strings.Contains(strings.ToLower(ct), "text/event-stream") {
+		return
+	}
+	if h.Get("Cache-Control") == "" {
+		h.Set("Cache-Control", "no-cache")
+	}
+	if h.Get("X-Accel-Buffering") == "" {
+		h.Set("X-Accel-Buffering", "no")
+	}
+}
