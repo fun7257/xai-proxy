@@ -40,7 +40,7 @@ docker build -t xai-proxy:local .
 
 ## Published releases (GitHub Actions)
 
-Publishing a GitHub **Release** (tag `v*`) runs [`.github/workflows/release.yml`](../.github/workflows/release.yml).  
+Pushing a tag `v*` (or publishing a GitHub **Release**) runs [`.github/workflows/release.yml`](../.github/workflows/release.yml); a tag push creates the Release automatically when missing.  
 You can also run it manually: **Actions → Release → Run workflow** (enter tag, e.g. `v0.1.0`; optional toggles for image / binaries).
 | Artifact | Platforms / arches |
 |----------|--------------------|

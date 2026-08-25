@@ -3,11 +3,14 @@
 #   - binaries for linux / darwin / windows (amd64 + arm64) → release assets
 #
 # Triggers:
+#   - Push of a v* tag (creates the GitHub Release if missing)
 #   - GitHub Release published
 #   - Manual: Actions → Release → Run workflow
 name: Release
 
 on:
+  push:
+    tags: ["v*"]
   release:
     types: [published]
   workflow_dispatch:
@@ -68,6 +71,11 @@ jobs:
           set -euo pipefail
           if [ "${{ github.event_name }}" = "release" ]; then
             TAG="${{ github.event.release.tag_name }}"
+            PUSH_IMAGE=true
+            UPLOAD_BINARIES=true
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            # Tag push: full release build; the Release is created below if missing.
+            TAG="${{ github.ref_name }}"
             PUSH_IMAGE=true
             UPLOAD_BINARIES=true
           else
