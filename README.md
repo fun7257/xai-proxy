@@ -67,6 +67,10 @@ KEY=$(./xai-proxy generate)
 
 ./xai-proxy login
 ./xai-proxy serve   # http://127.0.0.1:7257
+
+# Long non-SSE thinking: allow up to 30m before upstream response headers arrive
+# (default 15m; 0 disables the header wait)
+./xai-proxy serve --header-timeout=30m
 ```
 
 | Client setting | Value |

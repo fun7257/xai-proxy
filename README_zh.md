@@ -64,6 +64,10 @@ KEY=$(./xai-proxy generate)
 
 ./xai-proxy login
 ./xai-proxy serve   # http://127.0.0.1:7257
+
+# 非 SSE 长思考：最多等待 30 分钟直到上游返回响应头
+# （默认 15 分钟；0 表示关闭该超时）
+./xai-proxy serve --header-timeout=30m
 ```
 
 | 客户端设置 | 值 |
