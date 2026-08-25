@@ -399,6 +399,56 @@ func TestProxy_AuthRequired(t *testing.T) {
 	}
 }
 
+func rewriteToUpstreamWithHeaderTimeout(upstream *httptest.Server, headerTimeout time.Duration) *http.Client {
+	passthrough := outbound.PassThroughTransport()
+	passthrough.ResponseHeaderTimeout = headerTimeout
+	return &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			req2 := req.Clone(req.Context())
+			req2.URL.Scheme = "http"
+			req2.URL.Host = strings.TrimPrefix(upstream.URL, "http://")
+			req2.RequestURI = ""
+			return passthrough.RoundTrip(req2)
+		}),
+	}
+}
+
+// TestProxy_SlowNonSSEHeadersMapTo504 is the non-stream thinking case: upstream
+// holds response headers until generation finishes. A short ResponseHeaderTimeout
+// must surface as HTTP 504 upstream_timeout (not hang or 502).
+func TestProxy_SlowNonSSEHeadersMapTo504(t *testing.T) {
+	delay := 200 * time.Millisecond
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(delay)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":1}`))
+	}))
+	defer upstream.Close()
+
+	_, mgr := setupTokens(t)
+	cfg := Config{
+		Manager:  mgr,
+		Upstream: rewriteToUpstreamWithHeaderTimeout(upstream, 50*time.Millisecond),
+	}
+	srv := httptest.NewServer(http.HandlerFunc(cfg.HandleProxyWithRetry))
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/v1/chat/completions", "application/json",
+		strings.NewReader(`{"model":"grok-4.5","messages":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusGatewayTimeout {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s want 504", resp.StatusCode, b)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(b), "upstream_timeout") {
+		t.Fatalf("body=%s want upstream_timeout", b)
+	}
+}
+
 func TestIsLoopback(t *testing.T) {
 	if !IsLoopback("127.0.0.1") || !IsLoopback("localhost") {
 		t.Fatal()

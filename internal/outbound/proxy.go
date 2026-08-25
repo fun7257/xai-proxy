@@ -24,6 +24,11 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+// DefaultResponseHeaderTimeout bounds how long we wait for the first upstream
+// response header. Non-SSE chat often sends headers only after the model
+// finishes thinking, so this must be long enough for reasoning models.
+const DefaultResponseHeaderTimeout = 15 * time.Minute
+
 // Options configures outbound client construction.
 type Options struct {
 	// ProxyURL is an explicit proxy (http://, https://, socks5://, socks5h://).
@@ -31,6 +36,9 @@ type Options struct {
 	ProxyURL string
 	// Timeout is the client-level timeout (0 = no total timeout; use for streaming).
 	Timeout time.Duration
+	// ResponseHeaderTimeout is the max wait for the first response header.
+	// 0 = DefaultResponseHeaderTimeout (15m); negative = disable.
+	ResponseHeaderTimeout time.Duration
 }
 
 // defaultExplicit is set by CLI once for process-wide default when packages
@@ -121,7 +129,8 @@ func passThroughBaseTransport() *http.Transport {
 		IdleConnTimeout:     90 * time.Second,
 		TLSHandshakeTimeout: 15 * time.Second,
 		// Bound waits for response headers (body stream may still run long).
-		ResponseHeaderTimeout: 120 * time.Second,
+		// Non-SSE completions typically emit headers only after generation.
+		ResponseHeaderTimeout: DefaultResponseHeaderTimeout,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 }
@@ -152,6 +161,7 @@ func NewTransport(opts Options) (*http.Transport, error) {
 	}
 
 	base := passThroughBaseTransport()
+	base.ResponseHeaderTimeout = opts.responseHeaderTimeoutResolved()
 
 	switch kind {
 	case SchemeNone:
@@ -245,6 +255,18 @@ func noProxyBypasses(host string) bool {
 		}
 	}
 	return false
+}
+
+// responseHeaderTimeoutResolved returns the effective header-wait timeout.
+// 0 on the transport means disabled (no header deadline).
+func (opts Options) responseHeaderTimeoutResolved() time.Duration {
+	if opts.ResponseHeaderTimeout < 0 {
+		return 0
+	}
+	if opts.ResponseHeaderTimeout == 0 {
+		return DefaultResponseHeaderTimeout
+	}
+	return opts.ResponseHeaderTimeout
 }
 
 // NewClient builds an *http.Client using NewTransport.

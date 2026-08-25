@@ -2,7 +2,9 @@ package outbound
 
 import (
 	"crypto/tls"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -30,8 +32,8 @@ func TestNewTransport_HangMitigations(t *testing.T) {
 			t.Fatalf("unexpected TLSNextProto handler for %q", k)
 		}
 	}
-	if tr.ResponseHeaderTimeout < 30*time.Second {
-		t.Fatalf("ResponseHeaderTimeout too low or zero: %v", tr.ResponseHeaderTimeout)
+	if tr.ResponseHeaderTimeout != DefaultResponseHeaderTimeout {
+		t.Fatalf("ResponseHeaderTimeout=%v want default %v", tr.ResponseHeaderTimeout, DefaultResponseHeaderTimeout)
 	}
 	if tr.MaxIdleConnsPerHost < 8 {
 		t.Fatalf("MaxIdleConnsPerHost too small: %d", tr.MaxIdleConnsPerHost)
@@ -58,6 +60,87 @@ func TestPassThroughTransport_AndDirectClient(t *testing.T) {
 	if !ok || !ctr.DisableCompression {
 		t.Fatal("DirectClient must use pass-through transport")
 	}
+}
+
+func TestResponseHeaderTimeoutResolved(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   time.Duration
+		want time.Duration
+	}{
+		{"zero_default", 0, DefaultResponseHeaderTimeout},
+		{"custom", 3 * time.Minute, 3 * time.Minute},
+		{"negative_disable", -1, 0},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Options{ResponseHeaderTimeout: tt.in}.responseHeaderTimeoutResolved()
+			if got != tt.want {
+				t.Fatalf("got %v want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewTransport_ResponseHeaderTimeoutOptions(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "")
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("ALL_PROXY", "")
+	t.Setenv("XAI_PROXY_OUTBOUND", "")
+
+	tr, err := NewTransport(Options{ResponseHeaderTimeout: 45 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.ResponseHeaderTimeout != 45*time.Second {
+		t.Fatalf("got %v", tr.ResponseHeaderTimeout)
+	}
+
+	trOff, err := NewTransport(Options{ResponseHeaderTimeout: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trOff.ResponseHeaderTimeout != 0 {
+		t.Fatalf("negative should disable header timeout, got %v", trOff.ResponseHeaderTimeout)
+	}
+}
+
+func TestNewClient_ResponseHeaderTimeoutCutsSlowHeaders(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "")
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("ALL_PROXY", "")
+	t.Setenv("XAI_PROXY_OUTBOUND", "")
+
+	delay := 250 * time.Millisecond
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(delay)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":1}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	cut, err := NewClient(Options{Timeout: 0, ResponseHeaderTimeout: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = cut.Get(srv.URL)
+	if err == nil {
+		t.Fatal("expected header timeout when upstream thinks longer than ResponseHeaderTimeout")
+	}
+	if ne, ok := err.(net.Error); !ok || !ne.Timeout() {
+		t.Fatalf("err=%v want net.Error Timeout", err)
+	}
+
+	okClient, err := NewClient(Options{Timeout: 0, ResponseHeaderTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := okClient.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("longer header timeout should succeed: %v", err)
+	}
+	resp.Body.Close()
 }
 
 func TestClientOrDirect_InvalidProxyFallsBackToDirect(t *testing.T) {

@@ -97,7 +97,7 @@ func printUsage() {
 Usage:
   xai-proxy generate                         # mint client API key (overwrites; shown once)
   xai-proxy [--proxy URL] login  [--no-browser] [--proxy URL]
-  xai-proxy [--proxy URL] serve  [--host ...] [--port ...] [--proxy URL] [--i-understand-non-loopback-bind]
+  xai-proxy [--proxy URL] serve  [--host ...] [--port ...] [--proxy URL] [--header-timeout ...] [--i-understand-non-loopback-bind]
   xai-proxy status
   xai-proxy logout
   xai-proxy version
@@ -111,6 +111,8 @@ Client auth (local API key, required on /v1/*):
 
 serve options:
   --host / --port / --proxy
+  --header-timeout duration          max wait for upstream response headers (default 15m; 0 disables).
+                                     Non-SSE chat waits here while the model thinks.
   --i-understand-non-loopback-bind   required when --host is not loopback (client key still required)
 
 login options:
@@ -190,6 +192,7 @@ func cmdServe(args []string, globalProxy string) int {
 	host := fs.String("host", "127.0.0.1", "listen host")
 	port := fs.Int("port", 7257, "listen port")
 	proxyFlag := fs.String("proxy", "", "outbound HTTP or SOCKS5 proxy URL")
+	headerTimeout := fs.Duration("header-timeout", outbound.DefaultResponseHeaderTimeout, "max wait for upstream response headers (0 disables)")
 	allowRemote := fs.Bool("i-understand-non-loopback-bind", false, "required if host is not loopback; does not disable client API key auth")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
@@ -206,10 +209,10 @@ func cmdServe(args []string, globalProxy string) int {
 		fmt.Fprintln(os.Stderr, "Not logged in. Run `xai-proxy login` first.")
 		return 2
 	}
-	return runServe(*host, *port, *allowRemote, explicit)
+	return runServe(*host, *port, *allowRemote, explicit, *headerTimeout)
 }
 
-func runServe(host string, port int, allowRemote bool, explicitProxy string) int {
+func runServe(host string, port int, allowRemote bool, explicitProxy string, headerTimeout time.Duration) int {
 	if !proxy.IsLoopback(host) && !allowRemote {
 		fmt.Fprintf(os.Stderr,
 			"refusing to bind non-loopback address %q without --i-understand-non-loopback-bind\n"+
@@ -218,8 +221,13 @@ func runServe(host string, port int, allowRemote bool, explicitProxy string) int
 		return 2
 	}
 
-	// Timeout 0: allow long SSE/media bodies; header wait bounded in outbound transport.
-	upClient, err := outbound.NewClient(outbound.Options{Timeout: 0})
+	// Timeout 0: allow long SSE/media bodies. Header wait is separate so
+	// non-SSE thinking (headers arrive only after generation) is not cut at 2m.
+	headerOpt := headerTimeout
+	if headerTimeout <= 0 {
+		headerOpt = -1
+	}
+	upClient, err := outbound.NewClient(outbound.Options{Timeout: 0, ResponseHeaderTimeout: headerOpt})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "proxy client: %v\n", err)
 		return 1
@@ -261,6 +269,11 @@ func runServe(host string, port int, allowRemote bool, explicitProxy string) int
 	fmt.Fprintf(os.Stderr, "  Listening on:  http://%s/v1\n", srv.Addr())
 	fmt.Fprintf(os.Stderr, "  Forwarding to: https://api.x.ai/v1 (chat + images + tts + stt + videos)\n")
 	fmt.Fprintf(os.Stderr, "  Outbound:     %s\n", outbound.Describe(explicitProxy))
+	if headerTimeout <= 0 {
+		fmt.Fprintf(os.Stderr, "  Header wait:  disabled (no upstream header timeout)\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "  Header wait:  %s (non-SSE thinking waits here)\n", headerTimeout)
+	}
 	fmt.Fprintf(os.Stderr, "  Client auth:  required on /v1/* (Bearer local key)\n")
 	fmt.Fprintf(os.Stderr, "  Key hash:     %s\n", store.FormatClientKeyPath())
 	fmt.Fprintf(os.Stderr, "  Body limit:   %d bytes\n\n", proxy.MaxBodyBytes)

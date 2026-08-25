@@ -90,9 +90,11 @@ Refresh：单次使用、原子写回；**403** = 档位拒绝；`invalid_grant`
 ```text
 xai-proxy generate                          # 生成 client key（覆盖；只展示一次）
 xai-proxy [--proxy URL] login   [--no-browser] [--proxy URL]
-xai-proxy [--proxy URL] serve   [--host ...] [--port ...] [--proxy URL]
+xai-proxy [--proxy URL] serve   [--host ...] [--port ...] [--proxy URL] [--header-timeout ...]
 xai-proxy status | logout | version
 ```
+
+`--header-timeout`（默认 **15 分钟**，`0` 关闭）是等待上游 **响应头** 的上限。非 SSE 的 `/chat/completions` 通常要等模型思考结束后才发响应头；原先 120 秒会把这类请求掐掉。SSE 仍无总超时（分片之间空闲 3 分钟）。
 
 ### 出站代理（OAuth + API 共用）
 

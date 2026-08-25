@@ -92,9 +92,11 @@ Refresh: single-use, atomic write-back; **403** = tier/entitlement denial; termi
 ```text
 xai-proxy generate                          # mint client key (overwrite; show once)
 xai-proxy [--proxy URL] login   [--no-browser] [--proxy URL]
-xai-proxy [--proxy URL] serve   [--host ...] [--port ...] [--proxy URL]
+xai-proxy [--proxy URL] serve   [--host ...] [--port ...] [--proxy URL] [--header-timeout ...]
 xai-proxy status | logout | version
 ```
+
+`--header-timeout` (default **15m**, `0` disables) is the max wait for upstream **response headers**. Non-SSE `/chat/completions` typically emits headers only after the model finishes thinking; the previous 120s default cut those requests. SSE still has no total timeout (3m idle between chunks).
 
 ### Outbound proxy (shared by OAuth + API)
 
